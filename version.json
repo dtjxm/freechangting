@@ -1,11 +1,11 @@
 {
   "versionCode": 23,
   "versionName": "1.1.1",
-  "url": "https://cdn.jsdelivr.net/gh/dtjxm/freechangting@main/app-release.apk",
-  "size": 3128862,
-  "md5": "4f1e547fe6e033b959ac0b3d87caa987",
-  "sha256": "05232f0c74a79d2b3754737ee78968df0e448b674eb720e6e7225f52e22a8384",
+  "url": "https://ghproxy.net/https://raw.githubusercontent.com/dtjxm/freechangting/main/app-release.apk",
+  "size": 3129494,
+  "md5": "a8da4fa1901fc1ab05ffe93a70570009",
+  "sha256": "d238b027dcca703aec6e33f7f9abda0fc5984025befc00cc7de0ece85391fe7c",
   "note": "新增应用内更新：启动时会自动检查新版本，也可在「我的 → 检查更新」手动查；发现新版可直接在应用内下载并覆盖安装，收藏、历史、离线歌曲全部保留。\n本版起改用固定发布签名 —— 从旧版升级到这一版需要卸载旧版重装一次（系统把调试签名与发布签名视为两个不同应用），之后升级就不用再卸了。",
   "force": false,
-  "publishedAt": "2026-10-14T16:33:18.983Z"
+  "publishedAt": "2026-10-14T16:59:56.393Z"
 }
