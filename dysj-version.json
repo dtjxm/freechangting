@@ -1,0 +1,11 @@
+{
+  "versionCode": 53,
+  "versionName": "2.2.5",
+  "url": "https://raw.githubusercontent.com/dtjxm/freechangting/main/dysj-release.apk",
+  "size": 39003668,
+  "md5": "704b54e7278a5c263ad6b5deccaabf15",
+  "sha256": "224db5d2525e5f9fa0d692d3a8ddf20f83f96cc5919321b55bf1b1de2b6dd7af",
+  "note": "v2.2.5：详情页改版（上播放区+下详情）+ 分类选择 B 方案 + 应用内更新功能",
+  "force": false,
+  "publishedAt": "2026-10-14T17:05:52.047Z"
+}
