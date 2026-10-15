@@ -1,11 +1,11 @@
 {
   "versionCode": 54,
   "versionName": "2.2.6",
-  "url": "https://raw.githubusercontent.com/dtjxm/freechangting/main/dysj-release.apk",
+  "url": "https://ghfast.top/https://raw.githubusercontent.com/dtjxm/freechangting/main/dysj-release.apk",
   "size": 39003744,
-  "md5": "604bd0e69252dabd0ae40da63e8fe9ad",
-  "sha256": "f416f0c42d11d36ea34a2342fa47f842ff0721e1cfa1ff5894714f33669f8768",
-  "note": "v2.2.6：检查更新入口移到「关于」页 + 应用内更新功能",
+  "md5": "2911b4a4b1f681f4b5bef9c31ce7312b",
+  "sha256": "b65726870ecd3d5fab035d717e9a24896b7b0a761485c356c16000e379430ffd",
+  "note": "修复：①固定发布签名（老版本 debug 签名需卸载重装一次）；②修「下载完成后仍显示立即更新、再点重新下载」；③修 FileProvider authority 大小写不匹配导致安装崩溃；④更新通道改用 ghfast.top 多镜像回退。",
   "force": false,
-  "publishedAt": "2026-10-14T17:15:32.733Z"
+  "publishedAt": "2026-10-15T00:14:38.987Z"
 }
