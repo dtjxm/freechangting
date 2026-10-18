@@ -1,11 +1,11 @@
 {
-  "versionCode": 24,
-  "versionName": "1.1.2",
+  "versionCode": 25,
+  "versionName": "1.2.0",
   "url": "https://ghfast.top/https://raw.githubusercontent.com/dtjxm/freechangting/main/app-release.apk",
-  "size": 3129832,
-  "md5": "a66a3c3f8a7be9533c180a1322bf2b6d",
-  "sha256": "203dd8f71445cb23bd897b607c5f29ff59097d75f38569d3739eac329ecf64f6",
-  "note": "新增应用内更新：启动时会自动检查新版本，也可在「我的 → 检查更新」手动查；发现新版可直接在应用内下载并覆盖安装，收藏、历史、离线歌曲全部保留。\n本版起改用固定发布签名 —— 从旧版升级到这一版需要卸载旧版重装一次（系统把调试签名与发布签名视为两个不同应用），之后升级就不用再卸了。",
+  "size": 3131563,
+  "md5": "be532bf6fb82166da44fdcbeb6fe8f56",
+  "sha256": "a51c575904642074979ae65c5cf1100a7db3b529e5d4b2836a9d7fca8ffb2b4a",
+  "note": "广播全量升级：117 → 143 个电台，每条线路都实测过能播。新增央广卫星流（北京新闻、上海第一财经、福建新闻/经济、甘肃都市/经济、吉林乡村、音乐现场等）与香港电台（第一台/第二台/第五台、香港之声）；地区分类扩到九大区，补上北京/吉林/安徽/甘肃。",
   "force": false,
-  "publishedAt": "2026-10-14T17:19:15.447Z"
+  "publishedAt": "2026-10-18T15:20:11.741Z"
 }
