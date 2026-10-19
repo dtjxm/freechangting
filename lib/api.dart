@@ -635,6 +635,33 @@ class MacApi {
     return ListPage(_parseItems(obj, s), pc);
   }
 
+  /// v2.2.9：最新更新 —— 不带分类 id 的 `ac=detail&pg=1`，MacCMS 默认按更新时间倒序。
+  /// 个别源不支持无 t 查询时退回 `ac=list`（字段少一些，但能拿到列表）。
+  Future<List<VideoItem>> latest(MovieSource s, {int pg = 1}) async {
+    var obj = await _getJson(s.url, query: {'ac': 'detail', 'pg': '$pg'});
+    var items = _parseItems(obj, s);
+    if (items.isEmpty) {
+      obj = await _getJson(s.url, query: {'ac': 'list', 'pg': '$pg'});
+      items = _parseItems(obj, s);
+    }
+    return items;
+  }
+
+  /// 全部启用片源的最新更新（并发 8，单源取第 1 页）。
+  Future<List<VideoItem>> latestAll({int pages = 1}) async {
+    final tasks = activeSources.map((s) => () async {
+      final out = <VideoItem>[];
+      for (var p = 1; p <= pages; p++) {
+        final items = await latest(s, pg: p);
+        if (items.isEmpty) break;
+        out.addAll(items);
+      }
+      return out;
+    }).toList();
+    final res = await parallel(tasks, 8);
+    return res.expand((e) => e).toList();
+  }
+
   /// v2.2.0 v10：固定 Tab 的**多 id 解析** —— 同一片源里所有「规范名 == [subName]」的分类 id。
   ///
   /// 背景：一级「资讯」取消后，新闻资讯 / 头条 / 公告 / 娱乐动态 / 糖果画报 等

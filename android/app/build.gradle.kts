@@ -29,7 +29,10 @@ android {
     // 必须在打包阶段显式排除，否则 x86_64 的 15MB libmpv 会一起进包。
     packaging {
         jniLibs {
-            excludes += listOf("lib/x86_64/**", "lib/x86/**")
+            // v2.2.9 瘦身：只留 arm64-v8a。media_kit / ffmpeg 的 .so 是以 AAR/JAR
+            // 形式预置的，`defaultConfig.ndk.abiFilters` 管不到，必须在打包阶段
+            // 显式排除 32 位（armeabi-v7a）与模拟器（x86/x86_64）目录。
+            excludes += listOf("lib/armeabi-v7a/**", "lib/x86_64/**", "lib/x86/**")
         }
     }
 
@@ -47,11 +50,11 @@ android {
         versionCode = flutter.versionCode
         versionName = flutter.versionName
 
-        // v2.2.7 瘦身：只打真机在用的两种 ARM ABI。
-        // media_kit（libmpv）每个 ABI 的 .so 就有 11–15MB，x86_64 只有模拟器用得上，
-        // 不裁掉会把安装包从 88MB 顶到 128MB。
+        // v2.2.9 瘦身：只保留 arm64-v8a。
+        // media_kit（libmpv）+ ffmpeg 每个 ABI 的 .so 都有十几 MB；用户明确
+        // 「可以不考虑老版本手机，体积越小越好」，故不再打 32 位 armeabi-v7a。
         ndk {
-            abiFilters += listOf("arm64-v8a", "armeabi-v7a")
+            abiFilters += listOf("arm64-v8a")
         }
     }
 

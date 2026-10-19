@@ -141,8 +141,8 @@ class TvChannel {
 
 /// 清单：一级 / 二级 / 频道索引
 class TvCatalog {
-  /// 一级固定四类（顺序即展示顺序）
-  static const List<String> tops = ['央视频道', '卫视频道', '地方频道', '港澳台·国际', '未分类'];
+  /// 一级固定四类（顺序即展示顺序）。v2.2.9 起清单重建后不再有「未分类」。
+  static const List<String> tops = ['央视频道', '卫视频道', '地方频道', '港澳台·国际'];
 
   /// 港澳台·国际 的固定二级（靳老师定稿：香港 / 澳门 / 台湾 / 国际 / 其他）
   static const List<String> hmtSubs = ['香港', '澳门', '台湾', '国际', '其他'];

@@ -16,7 +16,7 @@ publish_to: 'none' # Remove this line if you wish to publish to pub.dev
 # https://developer.apple.com/library/archive/documentation/General/Reference/InfoPlistKeyReference/Articles/CoreFoundationKeys.html
 # In Windows, build-name is used as the major, minor, and patch parts
 # of the product and file versions while build-number is used as the build suffix.
-version: 2.2.8+56
+version: 2.2.9+57
 
 environment:
   sdk: ^3.13.2
@@ -83,7 +83,7 @@ flutter:
     - assets/icon.png
     - assets/sources.json
     - assets/live_ok.json   # 可播频道白名单（10-14 全量探测结果，用于下架点开播不了的台）
-    - assets/live_tv_channels.json  # v2.2.7 直播频道清单（932 台 / 1500+ 实测线路）
+    - assets/live_tv_channels.json  # v2.2.9 直播频道清单（830 台 / 2,063 条实测可播线路）
     # v2.2.7 修复（缺陷 6）：央视台标离线内置 —— 资产里以 `asset:cctv1.png` 引用，
     # 加载优先级：本地内置 → 网络（本地缓存） → 首字色块
     - assets/logos/cctv/

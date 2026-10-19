@@ -9,8 +9,10 @@ import 'download_service.dart';
 import 'live_source_health.dart';
 import 'local_proxy.dart';
 import 'models.dart';
+import 'network_signature.dart';
 import 'pages/download_page.dart';
 import 'pages/home_page.dart';
+import 'pages/latest_page.dart';
 import 'pages/live_page.dart';
 import 'pages/mine_page.dart';
 import 'pages/player_page.dart';
@@ -91,26 +93,56 @@ Future<String?> bootstrap({void Function(String)? onProgress}) async {
   }
   // v2.2.4：先同步「片源管理」里停用的片源 —— 加载 / 检索 / 换源统一只看已启用源
   MacApi.instance.setDisabledSources(AppStore.instance.disabledSourceIds);
-  if (err == null &&
-      !AppStore.instance.manualSource &&
-      MacApi.instance.sources.isNotEmpty) {
-    onProgress?.call('正在测速，为你挑选最快片源…');
-    try {
-      // v2.2.1：测速预算 15s → 9s。测速本身已改为「单源 5s 超时 + 并发 20」，
-      // 并在探测时顺便把分类树写进分类缓存（首页因此少一轮请求）。
-      // 死源不再把启动页拖到十几秒 —— 这是「首页加载很慢」的主要来源。
-      // v2.2.4：只测已启用片源（停用源不必再花时间）。
-      final lat = await MacApi.instance
-          .benchmarkSources(activeOnly: true)
-          .timeout(const Duration(seconds: 9));
-      if (lat.isNotEmpty) {
-        final fastest = lat.entries
-            .reduce((a, b) => a.value <= b.value ? a : b)
-            .key;
-        AppStore.instance.fastSourceId = fastest;
+  if (err == null && MacApi.instance.sources.isNotEmpty) {
+    final store = AppStore.instance;
+    final now = DateTime.now();
+    final last = store.sourceLastTest;
+    final lastAt =
+        last > 0 ? DateTime.fromMillisecondsSinceEpoch(last) : null;
+    // 本地时区的“同一天”：跨天即视为当天第一次打开
+    final sameDay = lastAt != null &&
+        lastAt.year == now.year &&
+        lastAt.month == now.month &&
+        lastAt.day == now.day;
+    // 与上次测速时的网络指纹比较；旧版本没有指纹（空串）时补测一次
+    final sig = await currentNetworkSignature();
+    final netChanged = sig.isNotEmpty && sig != store.sourceLastTestNetwork;
+    // 需求：每天第一次打开测速；换网后第一次打开也测速。其余启动直接用缓存。
+    final needTest = last == 0 || !sameDay || netChanged;
+
+    var lat = store.sourceLatency;
+    if (needTest) {
+      onProgress?.call('正在测速，为你挑选最快片源…');
+      try {
+        // v2.2.1：测速预算 15s → 9s。测速本身已改为「单源 5s 超时 + 并发 20」，
+        // 并在探测时顺便把分类树写进分类缓存（首页因此少一轮请求）。
+        // v2.2.4：只测已启用片源（停用源不必再花时间）。
+        final fresh = await MacApi.instance
+            .benchmarkSources(activeOnly: true)
+            .timeout(const Duration(seconds: 9));
+        if (fresh.isNotEmpty) {
+          lat = fresh;
+          store.sourceLatency = fresh;
+          store.sourceLastTest = now.millisecondsSinceEpoch;
+          store.sourceLastTestNetwork = sig;
+          // 失败源也落盘，片源管理页可直接显示“失败”，无需重测
+          final active = MacApi.instance.activeSources.map((s) => s.id).toSet();
+          store.sourceFail =
+              active.where((id) => !fresh.containsKey(id)).toList();
+        }
+      } catch (_) {
+        /* 测速失败不影响使用，下次启动会重试 */
       }
-    } catch (_) {
-      /* 测速失败不影响使用 */
+    }
+
+    // 用户手选过片源时只更新延迟数据，不覆盖他的选择
+    if (!store.manualSource && lat.isNotEmpty) {
+      final active = MacApi.instance.activeSources.map((s) => s.id).toSet();
+      final usable = lat.entries.where((e) => active.contains(e.key));
+      if (usable.isNotEmpty) {
+        store.fastSourceId =
+            usable.reduce((a, b) => a.value <= b.value ? a : b).key;
+      }
     }
   }
   return err;
@@ -274,7 +306,7 @@ class _HomeShellState extends State<HomeShell> {
       return;
     }
     if (!mounted) return;
-    setState(() => _index = 2);
+    setState(() => _index = 3);
     Navigator.of(
       context,
       rootNavigator: true,
@@ -435,7 +467,8 @@ class _HomeShellState extends State<HomeShell> {
               //   把当前 tab 传给 LivePage，它才能在切走时把系统状态栏还回去。
               children: [
                 const HomePage(),
-                LivePage(active: _index == 1),
+                LatestPage(active: _index == 1),
+                LivePage(active: _index == 2),
                 const MinePage(),
               ],
             ),
@@ -450,6 +483,11 @@ class _HomeShellState extends State<HomeShell> {
             icon: Icon(Icons.movie_outlined),
             selectedIcon: Icon(Icons.movie),
             label: '首页',
+          ),
+          NavigationDestination(
+            icon: Icon(Icons.new_releases_outlined),
+            selectedIcon: Icon(Icons.new_releases),
+            label: '最新',
           ),
           NavigationDestination(
             icon: Icon(Icons.live_tv_outlined),

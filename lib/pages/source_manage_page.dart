@@ -16,6 +16,7 @@ import 'package:flutter/services.dart';
 
 import '../api.dart';
 import '../models.dart';
+import '../network_signature.dart';
 import '../store.dart';
 import '../theme.dart';
 
@@ -78,6 +79,7 @@ class _SourceManagePageState extends State<SourceManagePage> {
       st.sourceLatency = lat;
       st.sourceFail = fail;
       st.sourceLastTest = DateTime.now().millisecondsSinceEpoch;
+      st.sourceLastTestNetwork = await currentNetworkSignature();
 
       // 需求：测速完成后把「默认片源」自动设为最快的源；
       // 同时清掉手选标记与手选记录，首页才会按最快源加载。

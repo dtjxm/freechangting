@@ -75,6 +75,7 @@ class AppStore extends ChangeNotifier {
   static const _kSrcLatency = 'dysj_source_latency';
   static const _kSrcFail = 'dysj_source_fail';
   static const _kSrcLastTest = 'dysj_source_last_test';
+  static const _kSrcLastNet = 'dysj_source_last_net';
   static const _kSearchHis = 'dysj_search_history';
   static const _kLiveM3u = 'dysj_live_m3u';
   static const _kAdSkip = 'dysj_ad_skip';
@@ -205,6 +206,11 @@ class AppStore extends ChangeNotifier {
   /// 上次测速时间戳（毫秒；0 = 尚未测速）
   int get sourceLastTest => _prefs?.getInt(_kSrcLastTest) ?? 0;
   set sourceLastTest(int v) => _prefs?.setInt(_kSrcLastTest, v);
+
+  /// 上次测速时的网络指纹（wlan0:192.168.x.x 等；空 = 旧版本未记录）
+  String get sourceLastTestNetwork => _prefs?.getString(_kSrcLastNet) ?? '';
+  set sourceLastTestNetwork(String v) =>
+      _prefs?.setString(_kSrcLastNet, v);
 
   /// 片源管理变更信号：每次「立即测速 / 开关片源 / 全部开启」自增并通知，
   /// 首页据此重新按优先级选源并重载（v2.2.4 需求：首页默认为最快片源）。

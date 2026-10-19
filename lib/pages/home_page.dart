@@ -77,7 +77,9 @@ class _HomePageState extends State<HomePage> {
   bool _pendingLoad = false;
   int _gen = 0;
   bool _initialError = false;
-  Map<int, int> _latency = {}; // 测速结果（弹窗里显示）
+  // 测速结果（弹窗里显示 + 加载队列排序）。启动时由 bootstrap 按“每天/换网”
+  // 节流写入 AppStore，这里直接复用，切 Tab/重进首页不再重复测速。
+  Map<int, int> _latency = Map<int, int>.from(AppStore.instance.sourceLatency);
   int _seenSrcRev = 0; // v2.2.4：片源管理变更信号快照（测速/开关后据此重选源）
   final ScrollController _scroll = ScrollController();
 
@@ -95,7 +97,6 @@ class _HomePageState extends State<HomePage> {
   @override
   void initState() {
     super.initState();
-    final api = MacApi.instance;
     final store = AppStore.instance;
     _seenSrcRev = store.sourceRev;
     _pickSource();
@@ -106,14 +107,6 @@ class _HomePageState extends State<HomePage> {
     // v1.9.0：频道显示开关等设置变更 → 返回首页立即生效
     store.addListener(_onStoreChanged);
     _reset();
-    // 后台补测速仅供片源弹窗展示延迟；bootstrap 已测过或用户手选过则跳过
-    if (api.sources.isNotEmpty &&
-        !store.manualSource &&
-        store.fastSourceId < 0) {
-      api.benchmarkSources(activeOnly: true).then((lat) {
-        if (mounted && lat.isNotEmpty) setState(() => _latency = lat);
-      });
-    }
   }
 
   @override
@@ -132,6 +125,7 @@ class _HomePageState extends State<HomePage> {
     final rev = AppStore.instance.sourceRev;
     if (rev != _seenSrcRev) {
       _seenSrcRev = rev;
+      _latency = Map<int, int>.from(AppStore.instance.sourceLatency);
       _pickSource();
       _reset();
       return;
