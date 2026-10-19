@@ -27,11 +27,11 @@ import 'version.dart';
 const String _rawBase = 'https://raw.githubusercontent.com/dtjxm/freechangting/main';
 
 /// v2.2.7 起 APK 体积超 100MB（base64 后），走 GitHub Contents API 推不上去，
-/// 改上传到 GitHub Release 附件。下载地址是 release 的直链（固定文件名 dysj-release.apk）：
-///   https://github.com/dtjxm/freechangting/releases/download/v2.2.7/dysj-release.apk
-/// 国内直连 github.com 不稳，故仍走 ghfast.top 等镜像代理（实测可代理 release 附件）。
+/// 改上传到 GitHub Release 附件（固定文件名 dysj-release.apk）。
+/// v2.2.8 起用 release 的 `latest` 直链，以后每次发版只换附件，App 不再需要改这里。
+/// 国内直连 github.com 不稳，故仍走 ghfast.top 等镜像代理（实测可跟随 latest 重定向）。
 const String _apkReleaseUrl =
-    'https://github.com/dtjxm/freechangting/releases/download/v2.2.7/dysj-release.apk';
+    'https://github.com/dtjxm/freechangting/releases/latest/download/dysj-release.apk';
 
 /// 清单地址候选 —— 逐个尝试，哪个通返回哪个（第三方镜像可能偶尔抽风）。
 /// ⚠️ 与免费畅听同款踩坑结论：ghfast.top 实测 App 端 fetch 最稳（返回合法 JSON）；
