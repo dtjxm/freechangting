@@ -17,9 +17,10 @@ import 'package:wakelock_plus/wakelock_plus.dart';
 import '../api.dart';
 import '../download_service.dart';
 import '../local_proxy.dart';
-import '../theme.dart';
 import '../models.dart';
 import '../store.dart';
+import '../vod_source_health.dart';
+import 'player_widgets.dart';
 
 class PlayerPage extends StatefulWidget {
   final MovieSource source;
@@ -66,7 +67,6 @@ class _PlayerPageState extends State<PlayerPage> {
   // v2.2.7：用户选择的播放倍速。换源/换线路会重建 controller，_play() 里必须重设，
   // 否则每次换源都会回落成 1.0。网络点播 / 本地 file:// / content:// 三条路径共用本页。
   double _speed = 1.0;
-  static const List<double> _speeds = [0.5, 0.75, 1.0, 1.5, 2.0];
   // v1.5.2 按住倍速快进/快退：按住屏幕左侧持续快退、右侧持续快进，倍速渐增
   Timer? _holdTimer;
   int _seekDir = 0; // -1 快退 / 1 快进 / 0 未按住
@@ -77,6 +77,27 @@ class _PlayerPageState extends State<PlayerPage> {
   // v1.5.4 线路自动切换：播放失败自动换下一条线路，全部失败才提示换源
   final Set<int> _triedLines = {};
   bool _autoSwitching = false;
+
+  // v2.2.8 点播回退状态机：
+  //   线路失败 → 本片源其余线路 → 同名搜索换源（最多 3 个）→ 明确报错。
+  // _triedSources 记录本轮已尝试的片源 id；_fallbackStatus 是自动回退期间
+  // 常驻在加载动画下方的状态文案（_showHint 只有 0.8 秒，来不及读完）。
+  final Set<int> _triedSources = {};
+  int _autoSourceTries = 0;
+  static const int _maxAutoSources = 3;
+  String? _fallbackStatus;
+  Timer? _sourceHealthTimer;
+
+  /// 用户手动起播代号。自动回退期间用户一旦手动换集/换源，
+  /// 回退流程必须在下一个检查点立刻让路，不能把用户的选择覆盖掉。
+  int _manualPlayGen = 0;
+
+  /// 最近一次「确实播到过」的位置。换线路/换源时用它续播，
+  /// 而不是用失败控制器上的 0（起播失败时 position 一直是 0）。
+  Duration _lastGoodPos = Duration.zero;
+
+  /// 片源稳定播放 20 秒才算健康 —— 起播即卡住的线路不能重置失败计数。
+  static const Duration _sourceHealthyAfter = Duration(seconds: 20);
   // v1.9.0 顶栏时间展示：播放中不用退出也能看时间
   Timer? _clockTimer;
   String _clock = '';
@@ -118,8 +139,24 @@ class _PlayerPageState extends State<PlayerPage> {
     _play(widget.initialPosition);
   }
 
-  Future<void> _play(Duration? from, {bool autoRetry = false}) async {
-    if (!autoRetry) _triedLines.clear(); // 手动起播/换集时重置线路尝试记录
+  /// 起播当前 [from] 位置。
+  ///
+  /// 返回是否真正初始化成功。**自动回退必须自己检查返回值并继续尝试**：
+  /// `autoRetry: true` 时本方法不会自行调度下一轮（旧实现里内层回退会被
+  /// `_autoSwitching` 守卫挡住，导致整条回退链只走一步就停）。
+  Future<bool> _play(Duration? from, {bool autoRetry = false}) async {
+    if (!autoRetry) {
+      // 手动起播/换集/换源：重置本轮回退记录与续播位置
+      _manualPlayGen++;
+      _triedLines.clear();
+      _triedSources
+        ..clear()
+        ..add(_source.id);
+      _autoSourceTries = 0;
+      _lastGoodPos = from ?? Duration.zero;
+      _fallbackStatus = null;
+    }
+    _sourceHealthTimer?.cancel();
     final gen = ++_playGen; // v1.9.9 本轮播放代号
     setState(() {
       _initialized = false;
@@ -134,7 +171,7 @@ class _PlayerPageState extends State<PlayerPage> {
         await old.dispose();
       } catch (_) {}
     }
-    if (!mounted || gen != _playGen) return;
+    if (!mounted || gen != _playGen) return false;
     final url = _current.url;
     // v1.6.0：本地下载文件（file://）与在线流分开构建控制器；
     // v1.9.5：content://（媒体库恢复/文件管理外部视频）走专用控制器
@@ -169,7 +206,7 @@ class _PlayerPageState extends State<PlayerPage> {
         try {
           await vp.dispose();
         } catch (_) {}
-        return;
+        return false;
       }
       var start = from ?? Duration.zero;
       // v1.5.7：记录的进度已超片长（换线路片源时长不同等）→ 从头播
@@ -181,31 +218,49 @@ class _PlayerPageState extends State<PlayerPage> {
         try {
           await vp.dispose();
         } catch (_) {}
-        return;
+        return false;
       }
       await vp.play();
       if (!mounted || gen != _playGen || _vp != vp) {
         try {
           await vp.dispose();
         } catch (_) {}
-        return;
+        return false;
       }
       vp.addListener(_onTick);
       // v2.2.7：把用户选的倍速落到新建的 controller 上（换源/换集后保持倍速）。
       // 不 await —— 避免在 addListener 与 setState 之间多一个挂起点。
       unawaited(vp.setPlaybackSpeed(_speed));
-      setState(() => _initialized = true);
+      setState(() {
+        _initialized = true;
+        _fallbackStatus = null;
+      });
+      // 稳定播放 20 秒后才给片源记「成功」：起播即卡住的线路不能洗白。
+      // 本地文件（sourceId == -1）不参与片源健康度。
+      final sourceId = _source.id;
+      if (sourceId >= 0) {
+        _sourceHealthTimer = Timer(_sourceHealthyAfter, () {
+          if (!mounted || !_initialized || _error != null) return;
+          if (_vp != vp || !vp.value.isInitialized || vp.value.hasError) return;
+          if (_source.id != sourceId) return;
+          VodSourceHealth.markSuccess(sourceId);
+        });
+      }
       _armHide();
+      return true;
     } catch (e) {
       // v1.9.9：过期请求的失败不再触发自动换线路（避免旧失败覆盖新播放）
       if (!mounted || gen != _playGen || _vp != vp) {
         try {
           await vp.dispose();
         } catch (_) {}
-        return;
+        return false;
       }
-      // v1.5.4：播放失败自动切换下一条线路，全部失败才提示换源
+      // 自动回退流程自己会根据返回值继续尝试，不能在这里再调度一轮。
+      if (autoRetry) return false;
+      // v1.5.4：播放失败自动切换下一条线路，全部失败再换源
       unawaited(_autoNextLine());
+      return false;
     }
   }
 
@@ -239,42 +294,123 @@ class _PlayerPageState extends State<PlayerPage> {
     _showHint('已加入下载队列，可在「我的-下载」中查看进度');
   }
 
-  /// v1.5.4 线路自动切换：当前线路播放失败 → 按顺序尝试其余线路（保持当前集号，
-  /// 集号超出的线路从头播）；全部线路都失败 → 提示播放失败并建议「换源」
+  /// v1.5.4 / v2.2.8 自动回退状态机：
+  ///   当前线路失败 → 本片源其余线路 → 同名搜索换源（最多 3 个）→ 明确报错。
+  ///
+  /// 整个流程只持有一把 `_autoSwitching` 锁，内部通过 [_tryRemainingLines]
+  /// 等待每一次 [_play] 的结果，失败后接着试下一个 —— 不会再出现
+  /// 「切了一条线路就停住、一直转圈」的情况。
   Future<void> _autoNextLine() async {
-    if (_autoSwitching || !mounted) return;
+    if (_autoSwitching || !mounted || _error != null) return;
     _autoSwitching = true;
+    final manual = _manualPlayGen; // 本轮回退属于哪一次用户操作
     try {
-      final groups = _detail.groups;
       _triedLines.add(_group);
-      for (var step = 1; step <= groups.length; step++) {
-        final cand = (_group + step) % groups.length;
-        if (_triedLines.contains(cand)) continue;
-        if (groups[cand].episodes.isEmpty) {
-          _triedLines.add(cand);
-          continue;
-        }
-        final newEp = _ep < groups[cand].episodes.length ? _ep : 0;
-        if (mounted) {
-          setState(() {
-            _group = cand;
-            _ep = newEp;
-          });
-          _showHint('当前线路播放失败，自动切换到线路${cand + 1}');
-        }
-        await _play(null, autoRetry: true);
-        return;
+      if (await _tryRemainingLines(_group + 1, manual)) return;
+
+      // 当前片源所有线路都失败 → 记一次片源级失败（单条线路失败不记）。
+      // 本地文件（sourceId == -1）不参与片源健康度。
+      if (_source.id >= 0) VodSourceHealth.markFailure(_source.id);
+      if (!mounted) return;
+      setState(() => _fallbackStatus = '当前片源不可用，正在搜索其他片源…');
+
+      final results = await _searchSameName();
+      if (!mounted || manual != _manualPlayGen) return;
+
+      for (final d in results) {
+        if (!mounted || manual != _manualPlayGen) return;
+        if (_autoSourceTries >= _maxAutoSources) break;
+        if (_triedSources.contains(d.item.sourceId)) continue;
+        final src = _sourceOf(d);
+        if (src == null) continue;
+
+        _triedSources.add(src.id);
+        _autoSourceTries++;
+        setState(() => _fallbackStatus = '正在尝试「${src.name}」…');
+        _adoptDetail(d, src);
+        _triedLines.clear();
+        if (await _tryRemainingLines(0, manual)) return;
+
+        if (src.id >= 0) VodSourceHealth.markFailure(src.id);
       }
-      if (mounted) {
-        setState(
-          () => _error =
-              '播放失败：全部 ${groups.length} 条播放线路均无法访问，请点右上角「换源」切换片源，或稍后重试',
-        );
-      }
+
+      if (!mounted || manual != _manualPlayGen) return;
+      setState(() {
+        _fallbackStatus = null;
+        final tried = _autoSourceTries > 0
+            ? '已尝试当前片源全部线路及另外 $_autoSourceTries 个同名片源'
+            : '已尝试当前片源全部线路';
+        _error = '播放失败：$tried，均无法播放，请稍后重试或点右上角「换源」手动选择';
+      });
       _triedLines.clear(); // 允许用户手动重试
+      _triedSources.clear();
+    } catch (_) {
+      if (!mounted) return;
+      setState(() {
+        _fallbackStatus = null;
+        _error = '播放失败：自动切换线路时出错，请点「重试」或右上角「换源」';
+      });
     } finally {
       _autoSwitching = false;
     }
+  }
+
+  /// 从 [start] 开始环形尝试本片源尚未试过的线路；成功返回 true。
+  ///
+  /// 续播位置用 [_lastGoodPos]：失败线路的 position 一直是 0，拿它续播
+  /// 会把用户直接甩回片头。
+  Future<bool> _tryRemainingLines(int start, int manualGen) async {
+    final groups = _detail.groups;
+    if (groups.isEmpty) return false;
+
+    for (var step = 0; step < groups.length; step++) {
+      // 用户已手动换台/换源 → 视为「本轮回退已被取代」，直接结束。
+      if (!mounted || manualGen != _manualPlayGen) return true;
+      final cand = (start + step) % groups.length;
+      if (_triedLines.contains(cand)) continue;
+      if (groups[cand].episodes.isEmpty) {
+        _triedLines.add(cand);
+        continue;
+      }
+      final newEp = _ep < groups[cand].episodes.length ? _ep : 0;
+      setState(() {
+        _group = cand;
+        _ep = newEp;
+        _fallbackStatus = '正在尝试线路 ${cand + 1}…';
+      });
+      if (await _play(_lastGoodPos, autoRetry: true)) return true;
+      if (!mounted || manualGen != _manualPlayGen) return true;
+      _triedLines.add(cand);
+    }
+    return false;
+  }
+
+  /// 跨源同名搜索。超时/异常按「没有结果」处理，保证回退流程能走到明确报错。
+  Future<List<VideoDetail>> _searchSameName() async {
+    try {
+      final results = await MacApi.instance
+          .searchSameNameAllSources(_detail.item.name, _source)
+          .timeout(const Duration(seconds: 25));
+      // 健康片源优先；权重相同保持搜索完成顺序（稳定排序）。
+      return VodSourceHealth.order(results, (d) => d.item.sourceId);
+    } catch (_) {
+      return const <VideoDetail>[];
+    }
+  }
+
+  MovieSource? _sourceOf(VideoDetail d) => MacApi.instance.sources
+      .where((s) => s.id == d.item.sourceId)
+      .firstOrNull;
+
+  /// 把播放页切换到另一个片源的同名资源（不负责起播）。
+  void _adoptDetail(VideoDetail d, MovieSource src) {
+    final epsCount = d.groups.isNotEmpty ? d.groups.first.episodes.length : 0;
+    setState(() {
+      _detail = d;
+      _source = src;
+      _group = 0;
+      _ep = epsCount > 0 ? _ep.clamp(0, epsCount - 1) : 0;
+    });
   }
 
   double _dblX = -1;
@@ -324,6 +460,8 @@ class _PlayerPageState extends State<PlayerPage> {
       unawaited(_autoNextLine());
       return;
     }
+    // 记录真实播到过的位置，供换线路/换源续播。
+    if (v.value.position > _lastGoodPos) _lastGoodPos = v.value.position;
     if (v.value.isCompleted && mounted) {
       // 自动下一集（可在设置中关闭）
       final eps = _detail.groups[_group].episodes;
@@ -451,100 +589,20 @@ class _PlayerPageState extends State<PlayerPage> {
     });
   }
 
-  /// 倍速档位的展示文案：0.5 / 0.75 / 1.0 / 1.5 / 2.0
-  static String _speedText(double s) =>
-      s == 0.75 ? '0.75' : s.toStringAsFixed(1);
-
-  /// v2.2.7：播放倍速面板（与播放器同一套深色风格）
-  ///
-  /// ⚠️ 必须是 `isScrollControlled: true` + 横向 chip 行：
-  /// 播放器是**横屏**，屏幕高度只有 ~386dp，而 `showModalBottomSheet` 默认把面板高度
-  /// 限制在屏幕的 9/16（≈217dp）。此前用「标题 + 5 个 ListTile」竖排（≈280dp），
-  /// 1.5x / 2.0x 两档直接被裁到屏幕外 —— 用户只能选到 1.0x。
-  /// 改成一行 Wrap 芯片后总高 ≈100dp，横竖屏都放得下。
+  /// v2.2.7：播放倍速面板（面板实现见 player_widgets.dart）
   void _showSpeedSheet() {
-    showModalBottomSheet<void>(
-      context: context,
-      isScrollControlled: true,
-      backgroundColor: Colors.black87,
-      shape: const RoundedRectangleBorder(
-        borderRadius: BorderRadius.vertical(top: Radius.circular(16)),
-      ),
-      builder: (ctx) => SafeArea(
-        child: Padding(
-          padding: const EdgeInsets.fromLTRB(14, 12, 14, 16),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              const Text(
-                '播放倍速',
-                style: TextStyle(
-                  color: Colors.white,
-                  fontSize: 15,
-                  fontWeight: FontWeight.w600,
-                ),
-              ),
-              const SizedBox(height: 12),
-              // 一行放 5 档；屏宽不够时 Wrap 自动换行，仍不会超出面板
-              Wrap(
-                spacing: 10,
-                runSpacing: 10,
-                children: [
-                  for (final s in _speeds)
-                    _speedChip(ctx, s),
-                ],
-              ),
-            ],
-          ),
-        ),
-      ),
-    );
-  }
-
-  /// 单个倍速芯片：当前档位高亮 + 打勾
-  Widget _speedChip(BuildContext ctx, double s) {
-    final sel = (s - _speed).abs() < 0.001;
-    return InkWell(
-      borderRadius: BorderRadius.circular(20),
-      onTap: () async {
-        Navigator.of(ctx).pop();
+    showVodSpeedSheet(
+      context,
+      current: _speed,
+      onPick: (s) async {
         setState(() => _speed = s);
         await _vp?.setPlaybackSpeed(s);
         if (!mounted) return;
-        _showHint('${_speedText(s)} 倍速');
+        _showHint('${vodSpeedText(s)} 倍速');
         _armHide();
       },
-      child: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 9),
-        decoration: BoxDecoration(
-          color: sel
-              ? context.brand.withValues(alpha: 0.22)
-              : Colors.white.withValues(alpha: 0.10),
-          borderRadius: BorderRadius.circular(20),
-          border: sel ? Border.all(color: context.brand, width: 1.4) : null,
-        ),
-        child: Row(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Text(
-              '${_speedText(s)}x',
-              style: TextStyle(
-                color: sel ? context.brand : Colors.white,
-                fontSize: 14,
-                fontWeight: sel ? FontWeight.w700 : FontWeight.w500,
-              ),
-            ),
-            if (sel) ...[
-              const SizedBox(width: 4),
-              Icon(Icons.check, size: 15, color: context.brand),
-            ],
-          ],
-        ),
-      ),
     );
   }
-
   /// v1.9.0：当前系统时间 HH:mm
   static String _nowClock() {
     final n = DateTime.now();
@@ -557,6 +615,7 @@ class _PlayerPageState extends State<PlayerPage> {
     _hideTimer?.cancel();
     _holdTimer?.cancel();
     _clockTimer?.cancel();
+    _sourceHealthTimer?.cancel();
     final vp = _vp;
     if (vp != null) {
       AppStore.instance.saveHistory(
@@ -615,8 +674,8 @@ class _PlayerPageState extends State<PlayerPage> {
               child: _initialized && _vp != null
                   ? _videoLayer()
                   : _error != null
-                  ? _buildError()
-                  : const CircularProgressIndicator(color: Colors.redAccent),
+                  ? buildVodError(context, _error!, () => _play(null))
+                  : _buildLoading(),
             ),
             if (_gestureHint != null)
               Center(
@@ -642,26 +701,26 @@ class _PlayerPageState extends State<PlayerPage> {
     );
   }
 
-  Widget _buildError() => Padding(
-    padding: const EdgeInsets.all(32),
-    child: Column(
+  /// 加载态：自动回退期间在转圈下方常驻显示当前阶段。
+  Widget _buildLoading() {
+    return Column(
       mainAxisSize: MainAxisSize.min,
       children: [
-        const Icon(Icons.error_outline, color: Colors.white38, size: 44),
-        const SizedBox(height: 12),
-        Text(
-          _error!,
-          textAlign: TextAlign.center,
-          style: const TextStyle(color: Colors.white70, fontSize: 14),
-        ),
-        const SizedBox(height: 16),
-        FilledButton.tonal(
-          onPressed: () => _play(null),
-          child: const Text('重试'),
-        ),
+        const CircularProgressIndicator(color: Colors.redAccent),
+        if (_fallbackStatus != null) ...[
+          const SizedBox(height: 14),
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 24),
+            child: Text(
+              _fallbackStatus!,
+              textAlign: TextAlign.center,
+              style: const TextStyle(color: Colors.white70, fontSize: 13),
+            ),
+          ),
+        ],
       ],
-    ),
-  );
+    );
+  }
 
   void _onVStart(DragStartDetails d) {
     final w = context.size?.width ?? 1;
@@ -804,7 +863,7 @@ class _PlayerPageState extends State<PlayerPage> {
                 TextButton(
                   onPressed: _showSpeedSheet,
                   child: Text(
-                    _speed == 1.0 ? '倍速' : '${_speedText(_speed)}x',
+                    _speed == 1.0 ? '倍速' : '${vodSpeedText(_speed)}x',
                     style: const TextStyle(color: Colors.white, fontSize: 13),
                   ),
                 ),
@@ -890,10 +949,7 @@ class _PlayerPageState extends State<PlayerPage> {
     if (_switchingSource) return;
     setState(() => _switchingSource = true);
     _showHint('正在查找其他片源的同名影片…');
-    final results = await MacApi.instance.searchSameNameAllSources(
-      _detail.item.name,
-      _source,
-    );
+    final results = await _searchSameName();
     if (!mounted) return;
     setState(() => _switchingSource = false);
     if (results.isEmpty) {
@@ -901,51 +957,12 @@ class _PlayerPageState extends State<PlayerPage> {
       return;
     }
     _hideTimer?.cancel();
-    showModalBottomSheet(
-      context: context,
-      backgroundColor: const Color(0xFF1A1D23),
-      builder: (ctx) => SafeArea(
-        child: ListView(
-          shrinkWrap: true,
-          children: [
-            const Padding(
-              padding: EdgeInsets.all(14),
-              child: Text(
-                '切换到其他片源播放',
-                style: TextStyle(
-                  fontWeight: FontWeight.bold,
-                  color: Colors.white,
-                ),
-              ),
-            ),
-            ...results.map(
-              (d) => ListTile(
-                leading: const Icon(
-                  Icons.play_circle_outline,
-                  color: Colors.redAccent,
-                ),
-                title: Text(
-                  d.item.sourceName,
-                  style: const TextStyle(color: Colors.white, fontSize: 14),
-                ),
-                subtitle: Text(
-                  '${d.item.typeName}｜共 ${d.groups.fold<int>(0, (a, g) => a + g.episodes.length)} 集',
-                  style: const TextStyle(color: Colors.white54, fontSize: 12),
-                ),
-                onTap: () {
-                  Navigator.of(ctx).pop();
-                  _applySource(d);
-                },
-              ),
-            ),
-          ],
-        ),
-      ),
-    );
+    showVodSourceSheet(context, results, _applySource);
   }
 
   /// 应用换源：记住当前集号（按新源集数收敛），保存进度后从新源重新起播
   void _applySource(VideoDetail d) {
+    final src = _sourceOf(d) ?? _source;
     final pos = _vp?.value.position.inSeconds ?? 0;
     if (pos > 0) {
       AppStore.instance.saveHistory(
@@ -956,132 +973,44 @@ class _PlayerPageState extends State<PlayerPage> {
         groupIndex: _group,
       );
     }
-    final epsCount = d.groups.isNotEmpty ? d.groups.first.episodes.length : 0;
-    setState(() {
-      _detail = d;
-      _source =
-          MacApi.instance.sources
-              .where((s) => s.id == d.item.sourceId)
-              .firstOrNull ??
-          _source;
-      _group = 0;
-      _ep = epsCount > 0 ? _ep.clamp(0, epsCount - 1) : 0;
-    });
+    _adoptDetail(d, src);
     _showHint('已切换到「${d.item.sourceName}」');
-    _play(null);
+    // 手动换源 = 新一轮尝试，_play(autoRetry: false) 会清空回退记录。
+    // 从最后一次真实播放位置续播，而不是甩回片头。
+    unawaited(_play(_lastGoodPos));
   }
 
   /// v1.5.5 线路选择弹层：当前片源下的多条播放线路单选切换
   void _showLineSheet() {
     _hideTimer?.cancel();
     final groups = _detail.groups;
-    showModalBottomSheet(
-      context: context,
-      backgroundColor: const Color(0xFF1A1D23),
-      builder: (ctx) => SafeArea(
-        child: ListView(
-          shrinkWrap: true,
-          children: [
-            const Padding(
-              padding: EdgeInsets.all(14),
-              child: Text(
-                '选择播放线路（当前片源）',
-                style: TextStyle(fontWeight: FontWeight.bold),
-              ),
-            ),
-            for (var i = 0; i < groups.length; i++)
-              ListTile(
-                leading: Icon(
-                  i == _group
-                      ? Icons.radio_button_checked
-                      : Icons.radio_button_off,
-                  color: i == _group ? Colors.redAccent : Colors.white38,
-                  size: 20,
-                ),
-                title: Text(
-                  groups[i].from.isEmpty ? '线路${i + 1}' : groups[i].from,
-                  style: TextStyle(
-                    fontSize: 13.5,
-                    color: i == _group ? Colors.redAccent : Colors.white70,
-                    fontWeight: i == _group
-                        ? FontWeight.bold
-                        : FontWeight.normal,
-                  ),
-                ),
-                subtitle: Text(
-                  '${groups[i].episodes.length} 集',
-                  style: const TextStyle(fontSize: 11, color: Colors.white38),
-                ),
-                onTap: () {
-                  Navigator.pop(ctx);
-                  if (i == _group) return;
-                  setState(() {
-                    _group = i;
-                    if (_ep >= groups[i].episodes.length) _ep = 0;
-                  });
-                  _play(null);
-                },
-              ),
-          ],
-        ),
-      ),
+    showVodLineSheet(
+      context,
+      groups: groups,
+      current: _group,
+      onPick: (i) {
+        setState(() {
+          _group = i;
+          if (_ep >= groups[i].episodes.length) _ep = 0;
+        });
+        // 手动切线路保留当前播放位置。
+        _play(_lastGoodPos);
+      },
     ).then((_) => _armHide());
   }
 
   void _showEpSheet(List<Episode> eps) {
     _hideTimer?.cancel();
-    showModalBottomSheet(
-      context: context,
-      backgroundColor: const Color(0xFF1A1D23),
-      builder: (ctx) => SafeArea(
-        child: SizedBox(
-          height: 360,
-          child: Column(
-            children: [
-              Padding(
-                padding: const EdgeInsets.all(14),
-                child: Text(
-                  _detail.groups[_group].from.isEmpty
-                      ? '选集（线路${_group + 1}）'
-                      : '选集（${_detail.groups[_group].from}）',
-                  style: const TextStyle(fontWeight: FontWeight.bold),
-                ),
-              ),
-              Expanded(
-                child: GridView.builder(
-                  padding: const EdgeInsets.fromLTRB(14, 0, 14, 14),
-                  gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
-                    crossAxisCount: 4,
-                    mainAxisSpacing: 8,
-                    crossAxisSpacing: 8,
-                    childAspectRatio: 2.4,
-                  ),
-                  itemCount: eps.length,
-                  itemBuilder: (_, i) => OutlinedButton(
-                    onPressed: () {
-                      Navigator.pop(ctx);
-                      setState(() => _ep = i);
-                      _play(null);
-                    },
-                    style: OutlinedButton.styleFrom(
-                      padding: EdgeInsets.zero,
-                      side: BorderSide(
-                        color: i == _ep ? Colors.redAccent : Colors.white24,
-                      ),
-                    ),
-                    child: Text(
-                      eps[i].name,
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      style: const TextStyle(fontSize: 12),
-                    ),
-                  ),
-                ),
-              ),
-            ],
-          ),
-        ),
-      ),
+    final g = _detail.groups[_group];
+    showVodEpSheet(
+      context,
+      title: g.from.isEmpty ? '选集（线路${_group + 1}）' : '选集（${g.from}）',
+      episodes: eps,
+      current: _ep,
+      onPick: (i) {
+        setState(() => _ep = i);
+        _play(null);
+      },
     ).then((_) => _armHide());
   }
 
@@ -1091,8 +1020,9 @@ class _PlayerPageState extends State<PlayerPage> {
   static String _fmt(Duration d) {
     final m = d.inMinutes.remainder(60), s = d.inSeconds.remainder(60);
     final h = d.inHours;
-    if (h > 0)
+    if (h > 0) {
       return '$h:${m.toString().padLeft(2, '0')}:${s.toString().padLeft(2, '0')}';
+    }
     return '$m:${s.toString().padLeft(2, '0')}';
   }
 }

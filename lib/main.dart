@@ -6,6 +6,7 @@ import 'package:media_kit/media_kit.dart';
 
 import 'api.dart';
 import 'download_service.dart';
+import 'live_source_health.dart';
 import 'local_proxy.dart';
 import 'models.dart';
 import 'pages/download_page.dart';
@@ -18,6 +19,7 @@ import 'theme.dart';
 import 'update_service.dart';
 import 'logo_cache.dart';
 import 'update_sheet.dart';
+import 'vod_source_health.dart';
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -35,6 +37,14 @@ Future<void> main() async {
   // v2.2.7 优化：电视台台标本地缓存目录（进直播页前就建好）
   try {
     await LogoCache.init();
+  } catch (_) {}
+  // 源健康度记忆：失败过的直播线路 / 点播片源排在后面。
+  // 两个 Key 互不影响，并行读取；读盘失败不阻塞启动。
+  try {
+    await Future.wait([
+      LiveSourceHealth.load(),
+      VodSourceHealth.load(),
+    ]).timeout(const Duration(seconds: 2));
   } catch (_) {}
   // 先把界面画出来，数据在首页后台加载 —— 避免 splash 永久卡死
   runApp(const MovieApp());

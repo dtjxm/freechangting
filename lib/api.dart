@@ -8,6 +8,7 @@ import 'package:flutter/services.dart' show rootBundle;
 import 'package:http/http.dart' as http;
 
 import 'models.dart';
+import 'vod_source_health.dart';
 
 class CatResult {
   final List<Category> categories;
@@ -830,9 +831,26 @@ class MacApi {
 
   /// v1.4.0：多源加载队列 —— 指定源置顶，其余按测速延迟升序（未测速的排最后，保持原序）
   /// v2.2.4：已停用片源不参与加载（与 PC 版一致）
+  /// v2.2.8：本机近期整源失败的排到同延迟组的后面，避免每次首屏都先撞坏源。
   List<MovieSource> feedQueue(MovieSource first, Map<int, int> latency) {
-    final rest = activeSources.where((s) => s.id != first.id).toList()
-      ..sort((a, b) => (latency[a.id] ?? 1 << 30).compareTo(latency[b.id] ?? 1 << 30));
+    // 带下标排序：权重与延迟都相同时按下标兜底，保证「保持原序」不依赖
+    // List.sort 的稳定性（Dart 的 sort 不保证稳定）。
+    final indexed = activeSources
+        .where((s) => s.id != first.id)
+        .toList()
+        .asMap()
+        .entries
+        .toList()
+      ..sort((a, b) {
+        final ra = VodSourceHealth.rank(a.value.id);
+        final rb = VodSourceHealth.rank(b.value.id);
+        if (ra != rb) return ra.compareTo(rb);
+        final la = latency[a.value.id] ?? 1 << 30;
+        final lb = latency[b.value.id] ?? 1 << 30;
+        if (la != lb) return la.compareTo(lb);
+        return a.key.compareTo(b.key);
+      });
+    final rest = indexed.map((e) => e.value).toList();
     return [first, ...rest];
   }
 
@@ -957,6 +975,10 @@ class MacApi {
             })
         .toList();
     final res = await parallel(tasks, 8);
-    return res.whereType<VideoDetail>().toList();
+    // v2.2.8：健康片源优先（稳定排序，同权重保持搜索完成顺序）。
+    return VodSourceHealth.order(
+      res.whereType<VideoDetail>().toList(),
+      (d) => d.item.sourceId,
+    );
   }
 }
