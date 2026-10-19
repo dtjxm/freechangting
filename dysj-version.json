@@ -1,11 +1,11 @@
 {
-  "versionCode": 55,
-  "versionName": "2.2.7",
-  "url": "https://github.com/dtjxm/freechangting/releases/download/v2.2.7/dysj-release.apk",
-  "size": 118265818,
-  "md5": "abdc5b159007f6d525dafa3286fe58a2",
-  "sha256": "bb97c6431127670408467d70e3a0e78c925c019a8591c23cedc7d3b6e0c88a3f",
-  "note": "v2.2.7 直播专项：修复直播有声画面没声音（源音频 MP2，改用 libmpv 软解）；央视台按数字排序、CCTV-8K 归位；去顶部电量条；清理死链与点播混入；新增「未分类」并剥离广播电台；台标重制；分类「更多」弹窗加高；修「有声音却提示播放失败」与线路抢切；点播与已下载影片新增 0.5~2.0x 倍速。",
+  "versionCode": 56,
+  "versionName": "2.2.8",
+  "url": "https://ghfast.top/https://github.com/dtjxm/freechangting/releases/download/v2.2.8/dysj-release.apk",
+  "size": 117814435,
+  "md5": "36cf169bb9c8656ebed50fc45d993868",
+  "sha256": "77547dd3e34d192f814c7d0ff0a0a55d40942f61dee19799f87f4a867ece533b",
+  "note": "v2.2.8 稳定性专项：直播新增坏源记忆与健康度排序，起播后卡顿会自动切换线路；",
   "force": false,
-  "publishedAt": "2026-10-18T16:38:05.833Z"
+  "publishedAt": "2026-10-19T15:10:50.311Z"
 }
