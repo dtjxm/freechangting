@@ -2,10 +2,10 @@
   "versionCode": 2057,
   "versionName": "2.2.9",
   "url": "https://ghfast.top/https://github.com/dtjxm/freechangting/releases/download/v2.2.9/dysj-release.apk",
-  "size": 58099890,
-  "md5": "0b54391bcd5ab2c46e7e333921947561",
-  "sha256": "a878ce4615e989bcb490a22c133f55b3a4551ee381fb7515ab3ab3788d5c3009",
+  "size": 58837757,
+  "md5": "7cdb427c4567c053cf4da5b9abce6547",
+  "sha256": "d534d0dff048eddb2171ba78a47f561e05bc1ffc51314c12d0106208e9e50161",
   "note": "v2.2.9 优化：① 片源测速改为每天首次启动、换网后首次启动才自动执行，减少启动等待；② 底部新增「最新」，聚合各片源最新更新并按日期倒序排列；③ 电视清单全量实测重建：830 台 / 2,063 条可播线路，新增 227 台，剔除电台、网络直播与失效线路，一级分类固定为央视/卫视/地方/港澳台·国际；④ 仅保留 arm64-v8a，安装包由 113MB 降到约 55MB；⑤ versionCode 提到 2057，2.2.6 / 2.2.7 / 2.2.8 均可直接覆盖升级。",
   "force": false,
-  "publishedAt": "2026-10-19T23:46:47.609Z"
+  "publishedAt": "2026-10-20T12:08:14.248Z"
 }
