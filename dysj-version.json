@@ -1,11 +1,11 @@
 {
-  "versionCode": 2057,
-  "versionName": "2.2.9",
-  "url": "https://ghfast.top/https://github.com/dtjxm/freechangting/releases/download/v2.2.9/dysj-release.apk",
-  "size": 58837757,
-  "md5": "7cdb427c4567c053cf4da5b9abce6547",
-  "sha256": "d534d0dff048eddb2171ba78a47f561e05bc1ffc51314c12d0106208e9e50161",
-  "note": "v2.2.9 优化：① 片源测速改为每天首次启动、换网后首次启动才自动执行，减少启动等待；② 底部新增「最新」，聚合各片源最新更新并按日期倒序排列；③ 电视清单全量实测重建：830 台 / 2,063 条可播线路，新增 227 台，剔除电台、网络直播与失效线路，一级分类固定为央视/卫视/地方/港澳台·国际；④ 仅保留 arm64-v8a，安装包由 113MB 降到约 55MB；⑤ versionCode 提到 2057，2.2.6 / 2.2.7 / 2.2.8 均可直接覆盖升级。",
+  "versionCode": 2060,
+  "versionName": "2.4.0",
+  "url": "https://ghfast.top/https://github.com/dtjxm/freechangting/releases/download/v2.4.0/dysj-release.apk",
+  "size": 58253833,
+  "md5": "e1720c912e4999357734e2afe7f1131a",
+  "sha256": "ff72630ab516dc5bb8c75ae7fa8449b0896c67397f7a9dd7ce5df64300326d85",
+  "note": "v2.4.0 更新：① 详情页小窗播放——点播放先在详情页小窗播放，点「全屏」才铺满整屏，退出全屏或按返回回到小窗，播放不中断、进度不丢；竖屏视频全屏保持竖屏，横屏视频自动横屏。② 修复 6 项问题：起播 15 秒超时并自动换线、切后台自动暂停、假时长 24:00:00、断网无提示、直播切台看门狗 20 秒收紧到 12 秒、底部控件遮挡手势区。③ 电视线路流级验证：2,261 条线路逐条解析清单并实际下载媒体分片，719 条实测可播（覆盖 409 台），可播线路优先展示。④ versionCode 2060，2.2.9 及更早版本可直接覆盖升级。",
   "force": false,
-  "publishedAt": "2026-10-20T12:08:14.248Z"
+  "publishedAt": "2026-10-28T17:28:18.000Z"
 }
