@@ -185,15 +185,31 @@ class _HistoryPageState extends State<HistoryPage> {
               }
               if (src == null) return;
               // 有进度直接进播放器续播
-              final detail = await MacApi.instance.detail(src, h.item.vodId) ??
-                  VideoDetail(item: h.item);
+              final detail = await MacApi.instance.detail(src, h.item.vodId);
               if (!mounted) return;
+              if (detail == null || detail.groups.isEmpty) {
+                ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+                    content: Text('该片源暂无可用播放线路，请稍后重试或到详情页换源')));
+                return;
+              }
+              // v2.2.10 修复 P0：按记录线路续播，并对线路/集数越界做收敛，
+              // 避免 detail 兜底为空或集数变少时 groups[0] / episodes[39] 崩溃。
+              var gi = h.groupIndex;
+              if (gi < 0 || gi >= detail.groups.length) gi = 0;
+              final eps = detail.groups[gi].episodes;
+              if (eps.isEmpty) {
+                ScaffoldMessenger.of(context).showSnackBar(
+                    const SnackBar(content: Text('该线路暂无可播放剧集')));
+                return;
+              }
+              var ei = h.epIndex;
+              if (ei < 0 || ei >= eps.length) ei = eps.length - 1;
               Navigator.of(context).push(MaterialPageRoute(
                 builder: (_) => PlayerPage(
                   source: src,
                   detail: detail,
-                  groupIndex: 0,
-                  epIndex: h.epIndex,
+                  groupIndex: gi,
+                  epIndex: ei,
                   initialPosition: start,
                 ),
               ));

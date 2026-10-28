@@ -70,7 +70,6 @@ class _SettingsPageState extends State<SettingsPage> {
                 ],
               ),
             ),
-            _divider(context),
           ]),
 
           // v1.9.0：首页频道显示独立成页（开关返回首页立即生效）；片源开关已取消

@@ -1,7 +1,7 @@
 /// v2.2.7（优化版，不升版本号）电视直播页
 ///
 /// 口径（靳老师定稿）：
-///   · 一级固定四类：央视频道 / 卫视频道 / 地方频道 / 港澳台·国际，**没有「全部」**
+///   · 一级固定五类：央视频道 / 卫视频道 / 地方频道 / 港澳台 / 国际频道，**没有「全部」**
 ///   · 央视频道、卫视频道**取消二级**，按台名自然序整类平铺
 ///   · 港澳台·国际二级 = 香港 / 澳门 / 台湾 / 国际 / 其他
 ///   · 地方频道二级按省份（判不出的台已在数据侧联网查证补齐）
@@ -24,8 +24,6 @@ import 'live_widgets.dart';
 import 'widgets.dart';
 
 class LivePage extends StatefulWidget {
-  /// 兼容旧调用（v2.2.4 曾用于「影视点播」页，现已下线）
-  final String? lockedTop;
   final String title;
 
   /// 是否为**当前可见**的底部 Tab（由 HomeShell 按 selectedIndex 传入）
@@ -38,7 +36,6 @@ class LivePage extends StatefulWidget {
 
   const LivePage({
     super.key,
-    this.lockedTop,
     this.title = '电视',
     this.active = true,
   });

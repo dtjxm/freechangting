@@ -1,12 +1,5 @@
 [
   {
-    "id": 1,
-    "name": "艾旦",
-    "url": "https://lovedan.net/api.php/provide/vod/",
-    "ac": "detail",
-    "library": "约18.5万部"
-  },
-  {
     "id": 2,
     "name": "无尽",
     "url": "https://api.wujinapi.com/api.php/provide/vod/",
@@ -196,13 +189,6 @@
     "library": "约11.5万部"
   },
   {
-    "id": 29,
-    "name": "红牛",
-    "url": "https://www.hongniuzy2.com/api.php/provide/vod/",
-    "ac": "detail",
-    "library": "约11.5万部"
-  },
-  {
     "id": 30,
     "name": "虎牙",
     "url": "https://www.huyaapi.com/api.php/provide/vod/at/json",
@@ -215,13 +201,6 @@
     "url": "https://iqiyizyapi.com/api.php/provide/vod",
     "ac": "detail",
     "library": "约6.9万部"
-  },
-  {
-    "id": 32,
-    "name": "魔都动漫",
-    "url": "https://caiji.moduapi.cc/api.php/provide/vod/",
-    "ac": "detail",
-    "library": "约9万部"
   },
   {
     "id": 33,
@@ -261,7 +240,7 @@
   {
     "id": 38,
     "name": "非凡",
-    "url": "http://ffzy5.tv/api.php/provide/vod/",
+    "url": "https://ffzy5.tv/api.php/provide/vod/",
     "ac": "detail",
     "library": "约9.9万部"
   },
@@ -273,25 +252,11 @@
     "library": "约9.9万部"
   },
   {
-    "id": 40,
-    "name": "淘片",
-    "url": "https://taopianapi.com/cjapi/mc/vod/json.html",
-    "ac": "detail",
-    "library": "少量精选"
-  },
-  {
     "id": 41,
     "name": "飘零",
     "url": "https://p2100.net/api.php/provide/vod/",
     "ac": "detail",
     "library": "约10万部"
-  },
-  {
-    "id": 42,
-    "name": "步步高",
-    "url": "https://api.yparse.com/api/json",
-    "ac": "detail",
-    "library": "约29.8万部"
   },
   {
     "id": 43,
@@ -327,5 +292,26 @@
     "url": "https://iqiyizy.cc/api.php/provide/vod/",
     "ac": "detail",
     "library": "约6.9万部"
+  },
+  {
+    "name": "无尽3",
+    "url": "https://api.wujinapi.cc/api.php/provide/vod/",
+    "ac": "detail",
+    "library": "约12.2万部",
+    "id": 48
+  },
+  {
+    "name": "360备用",
+    "url": "https://360zy.com/api.php/provide/vod/",
+    "ac": "detail",
+    "library": "约7.3万部",
+    "id": 49
+  },
+  {
+    "name": "马达",
+    "url": "http://madouse.la/api.php/provide/vod/",
+    "ac": "detail",
+    "library": "新源实测可用",
+    "id": 50
   }
 ]

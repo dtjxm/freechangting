@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:io';
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -222,12 +223,13 @@ class _LivePlayerPageState extends State<LivePlayerPage> {
     }
     if (_idx < _lines.length - 1) {
       _idx++;
+      _lastFailAt = null; // v2.2.10：换线后不受上一轮 1 秒节流影响，避免卡在「正在连接」
       if (notice != null) _showNotice(notice);
       _play();
     } else {
       setState(() {
         _buffering = false;
-        _error = '播放失败：全部 ${_lines.length} 条线路都连不上';
+        _error = '播放失败：全部 ${_lines.length} 条线路都连不上\n可稍后重试或换一台';
       });
     }
   }
@@ -265,28 +267,48 @@ class _LivePlayerPageState extends State<LivePlayerPage> {
       _showControls = true;
       _inited = false;
     });
+    // v2.2.10：看门狗提前武装——open() 快速抛错时也有兜底，
+    // 不会出现「旧看门狗已取消、新看门狗还没建」而永久卡在正在连接。
+    // v2.4.0（P1-3）：20 秒太长——8 条线路全卡时用户要等近 3 分钟且全程
+    // 只有一个「线路N/M」字样。收紧到 12 秒，并在换线时给出明确原因。
+    _watchdog = Timer(const Duration(seconds: 12), () async {
+      if (!mounted || token != _playToken || _inited) return;
+      if (_playing) return; // 已在出声，绝不换线
+      if (await _netDown()) {
+        if (!mounted || token != _playToken || _inited) return;
+        setState(() {
+          _buffering = false;
+          _error = '网络未连接，请检查 Wi-Fi 或移动数据后重试';
+        });
+        return;
+      }
+      if (!mounted || token != _playToken || _inited) return;
+      _failCurrentLine(notice: '线路${_idx + 1} 无响应，正在切换…');
+    });
     try {
       // 复用同一个 Player 切线路：media_kit 会先停掉上一条流再打开新地址
       await _player.open(Media(_lines[_idx].url), play: true);
     } catch (_) {
       if (!mounted || token != _playToken) return;
-      _failCurrentLine();
+      if (await _netDown()) {
+        if (!mounted || token != _playToken) return;
+        setState(() {
+          _buffering = false;
+          _error = '网络未连接，请检查 Wi-Fi 或移动数据后重试';
+        });
+        return;
+      }
+      _failCurrentLine(notice: '线路${_idx + 1} 连接失败，正在切换…');
       return;
     }
-    if (!mounted || token != _playToken) return;
-    // 20 秒还没起播 → 视为死线（curl 实测都在 1 秒内，留足余量；
-    // 部分频道首帧慢/纯音频，12 秒会误杀，所以放宽到 20 秒）
-    _watchdog = Timer(const Duration(seconds: 20), () {
-      if (!mounted || token != _playToken || _inited) return;
-      if (_playing) return; // 已在出声，绝不换线
-      _failCurrentLine();
-    });
   }
 
   void _switchChan(int d) {
     final list = widget.all;
     if (list.isEmpty) return;
-    final i = (list.indexOf(_chan) + d) % list.length;
+    final k = list.indexOf(_chan);
+    // v2.2.10：找不到当前台时从 0 起算，避免负数取模跳到错误位置
+    final i = (k < 0 ? 0 : k + d) % list.length;
     setState(() {
       _chan = list[i];
       _lines = LiveSourceHealth.orderLines(_chan.lines);
@@ -300,6 +322,20 @@ class _LivePlayerPageState extends State<LivePlayerPage> {
   void _retryAll() {
     setState(() => _idx = 0);
     _play();
+  }
+
+  /// v2.4.0（P2-2）：断网时所有线路都会以同样方式失败，逐条试只是让用户
+  /// 多等 N×12 秒。起播失败/看门狗超时后先做一次轻量 DNS 探测：确认断网
+  /// 就直接给出网络提示，不再空转换线。
+  Future<bool> _netDown() async {
+    try {
+      final r = await InternetAddress.lookup(
+        'www.baidu.com',
+      ).timeout(const Duration(seconds: 3));
+      return r.isEmpty;
+    } catch (_) {
+      return true;
+    }
   }
 
   /// 当前频道最快线路的实测值（0 = 全部未测速）

@@ -29,6 +29,19 @@ class PlayerPage extends StatefulWidget {
   final int epIndex;
   final Duration? initialPosition;
 
+  /// v2.4.0：内嵌模式 —— 作为详情页的小窗 / 全屏层使用。
+  /// 不套 Scaffold、不自行 pop，屏幕方向由 [fullscreen] 与视频比例决定。
+  final bool embedded;
+
+  /// 内嵌模式下当前是否全屏。切换只改父级约束，播放器实例不变。
+  final bool fullscreen;
+
+  /// 内嵌模式：点「退出全屏」按钮时的回调。
+  final VoidCallback? onExitFullscreen;
+
+  /// 内嵌模式：点小窗上的「全屏」按钮时的回调。
+  final VoidCallback? onToggleFullscreen;
+
   const PlayerPage({
     super.key,
     required this.source,
@@ -36,13 +49,17 @@ class PlayerPage extends StatefulWidget {
     required this.groupIndex,
     required this.epIndex,
     this.initialPosition,
+    this.embedded = false,
+    this.fullscreen = false,
+    this.onExitFullscreen,
+    this.onToggleFullscreen,
   });
 
   @override
   State<PlayerPage> createState() => _PlayerPageState();
 }
 
-class _PlayerPageState extends State<PlayerPage> {
+class _PlayerPageState extends State<PlayerPage> with WidgetsBindingObserver {
   VideoPlayerController? _vp;
   bool _initialized = false;
   // v1.9.9 播放代号（代码审查 3.2）：每次 _play() 递增；异步等待点之后必须
@@ -115,18 +132,70 @@ class _PlayerPageState extends State<PlayerPage> {
 
   Episode get _current => _detail.groups[_group].episodes[_ep];
 
+  /// v2.4.0（P2-1）：源异常时 duration 会返回 24:00:00 这类离谱值。
+  /// 超过 12 小时一律视为「时长未知」，进度条按未知处理，不显示假总时长。
+  static bool _saneDuration(Duration d) =>
+      d > Duration.zero && d <= const Duration(hours: 12);
+
+  /// v2.4.0（P2-2）：把底层异常翻译成用户能懂的失败原因，
+  /// 供最终错误文案展示（断网时不能再只显示「均无法播放」）。
+  String _failHint = '';
+
+  static String _describeError(Object e) {
+    final s = e.toString();
+    if (e is TimeoutException || s.contains('TimeoutException')) return '线路连接超时';
+    if (e is SocketException ||
+        s.contains('SocketException') ||
+        s.contains('Failed host lookup') ||
+        s.contains('Network is unreachable')) {
+      return '网络未连接';
+    }
+    if (s.contains('403')) return '线路拒绝访问';
+    if (s.contains('404')) return '线路资源不存在';
+    if (s.contains('Source error') || s.contains('InvalidResponseCode')) {
+      return '线路返回错误';
+    }
+    return '';
+  }
+
+  /// v2.4.0（P1-2）：退到后台自动暂停，回前台恢复。
+  /// 原实现没有生命周期处理，按 Home 后视频继续解码播放（耗流量、可能出声）。
+  bool _pausedByLifecycle = false;
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    final vp = _vp;
+    if (vp == null || !_initialized) return;
+    if (state == AppLifecycleState.paused) {
+      _pausedByLifecycle = vp.value.isPlaying;
+      if (_pausedByLifecycle) {
+        vp.pause().catchError((_) {});
+        if (mounted) setState(() {});
+      }
+    } else if (state == AppLifecycleState.resumed) {
+      // 后台期间系统可能重置方向，回前台按当前模式重新应用
+      _applyOrientation();
+      if (_pausedByLifecycle) {
+        _pausedByLifecycle = false;
+        vp.play().catchError((_) {});
+        if (mounted) setState(() {});
+      }
+    }
+  }
+
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
     _detail = widget.detail;
     _source = widget.source;
-    _group = widget.groupIndex;
-    _ep = widget.epIndex;
-    SystemChrome.setPreferredOrientations([
-      DeviceOrientation.landscapeLeft,
-      DeviceOrientation.landscapeRight,
-    ]);
-    SystemChrome.setEnabledSystemUIMode(SystemUiMode.immersiveSticky);
+    // v2.2.10 修复 P0：四个入口共用，统一收敛入参，杜绝越界崩溃
+    final groups0 = widget.detail.groups;
+    _group = groups0.isEmpty ? 0 : widget.groupIndex.clamp(0, groups0.length - 1);
+    final eps0 = groups0.isEmpty ? const <Episode>[] : groups0[_group].episodes;
+    _ep = eps0.isEmpty ? 0 : widget.epIndex.clamp(0, eps0.length - 1);
+    // v2.4.0：方向不再写死横屏 —— 竖屏视频全屏要保持竖屏（用户需求第 6 条）
+    _applyOrientation();
     WakelockPlus.enable();
     // v1.9.0：顶栏时钟（每 10 秒刷新，分钟级展示足够）
     _clock = _nowClock();
@@ -137,6 +206,38 @@ class _PlayerPageState extends State<PlayerPage> {
       if (mounted) setState(() => _currentVolume = v);
     });
     _play(widget.initialPosition);
+  }
+
+  /// v2.4.0：视频本身是竖屏（宽/高 < 1）。
+  /// 全屏方向必须跟着片源走：竖屏短视频横过来看等于毁掉体验。
+  bool get _isPortraitVideo {
+    final r = _vp?.value.aspectRatio ?? 0;
+    return r > 0 && r < 1.0;
+  }
+
+  /// v2.4.0：按「当前模式 + 视频比例」决定系统方向。
+  /// 小窗固定竖屏；全屏时竖屏片走竖屏、横屏片走横屏。
+  void _applyOrientation() {
+    if (widget.embedded && !widget.fullscreen) {
+      SystemChrome.setPreferredOrientations([DeviceOrientation.portraitUp]);
+      SystemChrome.setEnabledSystemUIMode(SystemUiMode.edgeToEdge);
+      return;
+    }
+    if (_isPortraitVideo) {
+      SystemChrome.setPreferredOrientations([DeviceOrientation.portraitUp]);
+    } else {
+      SystemChrome.setPreferredOrientations([
+        DeviceOrientation.landscapeLeft,
+        DeviceOrientation.landscapeRight,
+      ]);
+    }
+    SystemChrome.setEnabledSystemUIMode(SystemUiMode.immersiveSticky);
+  }
+
+  @override
+  void didUpdateWidget(PlayerPage old) {
+    super.didUpdateWidget(old);
+    if (widget.fullscreen != old.fullscreen) _applyOrientation();
   }
 
   /// 起播当前 [from] 位置。
@@ -155,6 +256,7 @@ class _PlayerPageState extends State<PlayerPage> {
       _autoSourceTries = 0;
       _lastGoodPos = from ?? Duration.zero;
       _fallbackStatus = null;
+      _failHint = '';
     }
     _sourceHealthTimer?.cancel();
     final gen = ++_playGen; // v1.9.9 本轮播放代号
@@ -172,6 +274,11 @@ class _PlayerPageState extends State<PlayerPage> {
       } catch (_) {}
     }
     if (!mounted || gen != _playGen) return false;
+    // v2.2.10：空线路直接报错，避免 _current 越界
+    if (_detail.groups.isEmpty || _detail.groups[_group].episodes.isEmpty) {
+      setState(() => _error = '该影片暂无可播放线路');
+      return false;
+    }
     final url = _current.url;
     // v1.6.0：本地下载文件（file://）与在线流分开构建控制器；
     // v1.9.5：content://（媒体库恢复/文件管理外部视频）走专用控制器
@@ -199,7 +306,10 @@ class _PlayerPageState extends State<PlayerPage> {
     _isLocalFile = isLocal;
     _vp = vp;
     try {
-      await vp.initialize();
+      // v2.4.0（P1-1）：initialize() 必须带超时。源站不响应时原实现会无限
+      // 等待，界面永久停在「正在尝试线路 N…」，既不出错也不换线。
+      // 本地文件读取快，超时值放宽差异意义不大，统一 15 秒。
+      await vp.initialize().timeout(const Duration(seconds: 15));
       // v1.9.9：初始化期间已被更新请求取代/页面已销毁 → 丢弃本控制器，
       // 不再添加监听、不更新 _initialized，旧画面状态得以保留给新请求
       if (!mounted || gen != _playGen || _vp != vp) {
@@ -210,7 +320,7 @@ class _PlayerPageState extends State<PlayerPage> {
       }
       var start = from ?? Duration.zero;
       // v1.5.7：记录的进度已超片长（换线路片源时长不同等）→ 从头播
-      if (vp.value.duration > Duration.zero && start >= vp.value.duration) {
+      if (_saneDuration(vp.value.duration) && start >= vp.value.duration) {
         start = Duration.zero;
       }
       if (start > Duration.zero) await vp.seekTo(start);
@@ -235,6 +345,8 @@ class _PlayerPageState extends State<PlayerPage> {
         _initialized = true;
         _fallbackStatus = null;
       });
+      // 起播成功后才知道真实宽高比：全屏时在这里校准横竖屏
+      _applyOrientation();
       // 稳定播放 20 秒后才给片源记「成功」：起播即卡住的线路不能洗白。
       // 本地文件（sourceId == -1）不参与片源健康度。
       final sourceId = _source.id;
@@ -256,6 +368,13 @@ class _PlayerPageState extends State<PlayerPage> {
         } catch (_) {}
         return false;
       }
+      // v2.4.0（P2-2）：记录失败原因，供最终错误文案展示
+      _failHint = _describeError(e);
+      // v2.2.10：本轮控制器已初始化失败，及时释放，避免残留到退出播放页
+      try {
+        await vp.dispose();
+      } catch (_) {}
+      if (_vp == vp) _vp = null;
       // 自动回退流程自己会根据返回值继续尝试，不能在这里再调度一轮。
       if (autoRetry) return false;
       // v1.5.4：播放失败自动切换下一条线路，全部失败再换源
@@ -340,7 +459,8 @@ class _PlayerPageState extends State<PlayerPage> {
         final tried = _autoSourceTries > 0
             ? '已尝试当前片源全部线路及另外 $_autoSourceTries 个同名片源'
             : '已尝试当前片源全部线路';
-        _error = '播放失败：$tried，均无法播放，请稍后重试或点右上角「换源」手动选择';
+        final why = _failHint.isEmpty ? '' : '（本地原因：$_failHint）';
+        _error = '播放失败：$tried$why，均无法播放，请稍后重试或点右上角「换源」手动选择';
       });
       _triedLines.clear(); // 允许用户手动重试
       _triedSources.clear();
@@ -495,7 +615,9 @@ class _PlayerPageState extends State<PlayerPage> {
     if (!AppStore.instance.adSkip) return url;
     try {
       AdFilterProxy.instance.enabled = true;
-      await AdFilterProxy.instance.start();
+      // v2.4.0：代理启动同样要有上限，否则本地 server 起不来时
+      // 播放会卡在 await 上，界面上什么都看不到。
+      await AdFilterProxy.instance.start().timeout(const Duration(seconds: 3));
       return AdFilterProxy.instance.proxyUrl(url);
     } catch (_) {
       return url; // 代理不可用 → 退回直连，绝不阻断播放
@@ -582,9 +704,13 @@ class _PlayerPageState extends State<PlayerPage> {
     }
   }
 
+  Timer? _hintTimer;
+
   void _showHint(String text) {
     setState(() => _gestureHint = text);
-    Timer(const Duration(milliseconds: 800), () {
+    // v2.2.10：取消上一条定时器，连续提示不会被前一条提前抹掉
+    _hintTimer?.cancel();
+    _hintTimer = Timer(const Duration(milliseconds: 800), () {
       if (mounted) setState(() => _gestureHint = null);
     });
   }
@@ -611,6 +737,8 @@ class _PlayerPageState extends State<PlayerPage> {
 
   @override
   void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
+    _hintTimer?.cancel();
     _playGen++; // v1.9.9：作废尚未完成的播放请求，过期控制器只自弃不碰页面
     _hideTimer?.cancel();
     _holdTimer?.cancel();
@@ -637,64 +765,124 @@ class _PlayerPageState extends State<PlayerPage> {
 
   @override
   Widget build(BuildContext context) {
-    // v2.2.2（D1）：原 PopScope(canPop: true) 恒真、包装无作用 → 去掉包装，直接返回子树
-    return Scaffold(
-      backgroundColor: Colors.black,
-      body: GestureDetector(
-        behavior: HitTestBehavior.opaque,
-        onTap: _toggleControls,
-        onDoubleTapDown: (d) => _dblX = d.localPosition.dx,
-        onDoubleTap: () async {
-          final vp = _vp;
-          if (vp == null) return;
-          final w = context.size?.width ?? 1;
-          if (_dblX < w * 0.35) {
-            await _seekRelative(-10); // 双击左侧：快退 10 秒
-          } else if (_dblX > w * 0.65) {
-            await _seekRelative(10); // 双击右侧：快进 10 秒
-          } else {
-            vp.value.isPlaying ? await vp.pause() : await vp.play();
-            _toggleControls();
-          }
-        },
-        onLongPressStart: (d) => _onHoldStart(d.localPosition.dx),
-        onLongPressEnd: (_) => _onHoldEnd(),
-        onHorizontalDragEnd: (d) {
-          final v = d.primaryVelocity ?? 0;
-          if (v > 200) _seekRelative(-10);
-          if (v < -200) _seekRelative(10);
-        },
-        onVerticalDragStart: _onVStart,
-        onVerticalDragUpdate: _onVUpdate,
-        child: Stack(
-          fit: StackFit.expand,
-          children: [
-            // 视频层（画面比例：原比/铺满/16:9/4:3/9:16 可切换）
+    // v2.4.0：小窗模式下禁用全屏手势（双击快进 / 长按倍速 / 上下滑调亮度），
+    // 让上下滑穿透给详情页列表滚动；小窗只保留控制条上的播放与全屏按钮。
+    final mini = widget.embedded && !widget.fullscreen;
+    final content = GestureDetector(
+      behavior: HitTestBehavior.opaque,
+      onTap: mini ? null : _toggleControls,
+      onDoubleTapDown: mini ? null : (d) => _dblX = d.localPosition.dx,
+      onDoubleTap: mini
+          ? null
+          : () async {
+              final vp = _vp;
+              if (vp == null) return;
+              final w = context.size?.width ?? 1;
+              if (_dblX < w * 0.35) {
+                await _seekRelative(-10); // 双击左侧：快退 10 秒
+              } else if (_dblX > w * 0.65) {
+                await _seekRelative(10); // 双击右侧：快进 10 秒
+              } else {
+                vp.value.isPlaying ? await vp.pause() : await vp.play();
+                _toggleControls();
+              }
+            },
+      onLongPressStart: mini ? null : (d) => _onHoldStart(d.localPosition.dx),
+      onLongPressEnd: mini ? null : (_) => _onHoldEnd(),
+      onHorizontalDragEnd: mini
+          ? null
+          : (d) {
+              final v = d.primaryVelocity ?? 0;
+              if (v > 200) _seekRelative(-10);
+              if (v < -200) _seekRelative(10);
+            },
+      onVerticalDragStart: mini ? null : _onVStart,
+      onVerticalDragUpdate: mini ? null : _onVUpdate,
+      child: Stack(
+        fit: StackFit.expand,
+        children: [
+          // 视频层（画面比例：原比/铺满/16:9/4:3/9:16 可切换）
+          Center(
+            child: _initialized && _vp != null
+                ? _videoLayer()
+                : _error != null
+                ? buildVodError(context, _error!, () => _play(null))
+                : _buildLoading(),
+          ),
+          if (_gestureHint != null)
             Center(
-              child: _initialized && _vp != null
-                  ? _videoLayer()
-                  : _error != null
-                  ? buildVodError(context, _error!, () => _play(null))
-                  : _buildLoading(),
-            ),
-            if (_gestureHint != null)
-              Center(
-                child: Container(
-                  padding: const EdgeInsets.symmetric(
-                    horizontal: 16,
-                    vertical: 10,
-                  ),
-                  decoration: BoxDecoration(
-                    color: Colors.black54,
-                    borderRadius: BorderRadius.circular(24),
-                  ),
-                  child: Text(
-                    _gestureHint!,
-                    style: const TextStyle(color: Colors.white, fontSize: 15),
-                  ),
+              child: Container(
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 16,
+                  vertical: 10,
+                ),
+                decoration: BoxDecoration(
+                  color: Colors.black54,
+                  borderRadius: BorderRadius.circular(24),
+                ),
+                child: Text(
+                  _gestureHint!,
+                  style: const TextStyle(color: Colors.white, fontSize: 15),
                 ),
               ),
-            if (_showControls) _buildControls(),
+            ),
+          // 小窗用极简控制条：完整控制栏在 375dp 竖屏下会横向溢出
+          if (mini)
+            _buildMiniControls()
+          else if (_showControls)
+            _buildControls(),
+        ],
+      ),
+    );
+    // 内嵌模式：不套 Scaffold（否则会盖掉详情页 AppBar 与背景）
+    if (widget.embedded) {
+      return ColoredBox(color: Colors.black, child: content);
+    }
+    return Scaffold(backgroundColor: Colors.black, body: content);
+  }
+
+  /// v2.4.0：小窗极简控制条 —— 播放/暂停 + 片名 + 全屏。
+  Widget _buildMiniControls() {
+    final vp = _vp;
+    final playing = vp?.value.isPlaying ?? false;
+    return Align(
+      alignment: Alignment.bottomCenter,
+      child: Container(
+        height: 42,
+        decoration: const BoxDecoration(
+          gradient: LinearGradient(
+            begin: Alignment.topCenter,
+            end: Alignment.bottomCenter,
+            colors: [Colors.transparent, Colors.black54],
+          ),
+        ),
+        child: Row(
+          children: [
+            IconButton(
+              iconSize: 22,
+              icon: Icon(
+                playing ? Icons.pause : Icons.play_arrow,
+                color: Colors.white,
+              ),
+              onPressed: () async {
+                if (vp == null) return;
+                playing ? await vp.pause() : await vp.play();
+                setState(() {});
+              },
+            ),
+            Expanded(
+              child: Text(
+                '${_detail.item.name} · ${_current.name}',
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: const TextStyle(color: Colors.white70, fontSize: 11),
+              ),
+            ),
+            IconButton(
+              iconSize: 24,
+              icon: const Icon(Icons.fullscreen, color: Colors.white),
+              onPressed: widget.onToggleFullscreen,
+            ),
           ],
         ),
       ),
@@ -777,9 +965,15 @@ class _PlayerPageState extends State<PlayerPage> {
             bottom: false,
             child: Row(
               children: [
+                // v2.4.0：内嵌全屏时返回 = 退出全屏（回到小窗继续播）
                 IconButton(
-                  icon: const Icon(Icons.arrow_back, color: Colors.white),
-                  onPressed: () => Navigator.of(context).pop(),
+                  icon: Icon(
+                    widget.embedded ? Icons.fullscreen_exit : Icons.arrow_back,
+                    color: Colors.white,
+                  ),
+                  onPressed: widget.embedded
+                      ? widget.onExitFullscreen
+                      : () => Navigator.of(context).pop(),
                 ),
                 Expanded(
                   child: Text(
@@ -874,7 +1068,9 @@ class _PlayerPageState extends State<PlayerPage> {
           SafeArea(
             top: false,
             child: Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 8),
+              // v2.4.0（P2-3）：底部再留 8dp，避免播放/下一集按钮贴住
+              // 系统手势条导致首次点击被吞
+              padding: const EdgeInsets.only(left: 8, right: 8, bottom: 8),
               child: Row(
                 children: [
                   IconButton(

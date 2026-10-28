@@ -56,8 +56,16 @@ class LiveSourceHealth {
   ///
   /// 稳定很关键：权重相同时必须保持内置清单的原始顺序（测速由快到慢），
   /// 否则每次进频道都可能重排，用户手动切线路时的位置感会乱。
-  static List<TvLine> orderLines(List<TvLine> lines) =>
-      _store.order(lines, (l) => l.url);
+  static List<TvLine> orderLines(List<TvLine> lines) {
+    // v2.4.0：实测可播的线路排最前。用稳定分区（而非 sort）保证同组内
+    // 仍按内置测速顺序——Dart 的 List.sort 不稳定，会打乱测速序。
+    final ok = <TvLine>[];
+    final rest = <TvLine>[];
+    for (final l in lines) {
+      (l.verified ? ok : rest).add(l);
+    }
+    return _store.order([...ok, ...rest], (l) => l.url);
+  }
 
   /// 播放成功：抹掉这条源的失败记录。
   static void markSuccess(String url) => _store.markSuccess(url);

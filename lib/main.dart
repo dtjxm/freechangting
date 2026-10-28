@@ -480,23 +480,23 @@ class _HomeShellState extends State<HomeShell> {
         onDestinationSelected: (i) => setState(() => _index = i),
         destinations: const [
           NavigationDestination(
-            icon: Icon(Icons.movie_outlined),
-            selectedIcon: Icon(Icons.movie),
+            icon: Icon(Icons.home_outlined),
+            selectedIcon: Icon(Icons.home),
             label: '首页',
           ),
           NavigationDestination(
-            icon: Icon(Icons.new_releases_outlined),
-            selectedIcon: Icon(Icons.new_releases),
+            icon: Icon(Icons.whatshot_outlined),
+            selectedIcon: Icon(Icons.whatshot),
             label: '最新',
           ),
           NavigationDestination(
-            icon: Icon(Icons.live_tv_outlined),
-            selectedIcon: Icon(Icons.live_tv),
+            icon: Icon(Icons.tv_outlined),
+            selectedIcon: Icon(Icons.tv),
             label: '电视',
           ),
           NavigationDestination(
-            icon: Icon(Icons.person_outline),
-            selectedIcon: Icon(Icons.person),
+            icon: Icon(Icons.account_circle_outlined),
+            selectedIcon: Icon(Icons.account_circle),
             label: '我的',
           ),
         ],

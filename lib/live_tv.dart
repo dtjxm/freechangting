@@ -3,7 +3,7 @@
 /// 数据来源：随包内置的 `assets/live_tv_channels.json`
 /// —— 由 PC 端流水线离线生成并**逐线路实测**：
 ///   probe_all_live.py（全工程 124 条订阅清单 → 抓取 → 合并 → 全量线路连通性探测）
-///   → finalize_tv_channels.py（只留央视/卫视/地方/港澳台·国际，剔除非电视台、补省）
+///   → finalize_tv_channels.py（只留央视/卫视/地方/港澳台/国际频道，剔除非电视台、补省）
 ///
 /// 与旧实现（运行时拉 20 组动态清单）的区别：
 ///   · **台数固定**：以这份实测清单为准，上游每日变动不会让用户看到台数忽增忽减；
@@ -20,7 +20,12 @@ import 'package:flutter/services.dart' show rootBundle;
 class TvLine {
   final String url;
   final int ms;
-  const TvLine(this.url, this.ms);
+
+  /// v2.4.0：服务端做过流级验证 —— 确实从这条线路取到过媒体分片。
+  /// 它不是「一定永远能播」，但比只测过连通性的线路可靠得多，排序时优先。
+  final bool verified;
+
+  const TvLine(this.url, this.ms, {this.verified = false});
 }
 
 /// 一个电视台频道
@@ -29,7 +34,7 @@ class TvChannel {
   final String name;
   final String logo;
   final String group;
-  final String top; // 央视频道 / 卫视频道 / 地方频道 / 港澳台·国际
+  final String top; // 央视频道 / 卫视频道 / 地方频道 / 港澳台 / 国际频道
   final String sub; // 省份 或 香港/澳门/台湾/国际/其他（央视/卫视为空）
   final List<TvLine> lines;
 
@@ -141,11 +146,18 @@ class TvChannel {
 
 /// 清单：一级 / 二级 / 频道索引
 class TvCatalog {
-  /// 一级固定四类（顺序即展示顺序）。v2.2.9 起清单重建后不再有「未分类」。
-  static const List<String> tops = ['央视频道', '卫视频道', '地方频道', '港澳台·国际'];
+  /// 一级固定五类（v2.3.0：港澳台与国际拆分为两个独立大类）
+  static const List<String> tops = ['央视频道', '卫视频道', '地方频道', '港澳台', '国际频道'];
 
-  /// 港澳台·国际 的固定二级（靳老师定稿：香港 / 澳门 / 台湾 / 国际 / 其他）
-  static const List<String> hmtSubs = ['香港', '澳门', '台湾', '国际', '其他'];
+  /// 港澳台 的固定二级
+  static const List<String> hmtSubs = ['香港', '澳门', '台湾'];
+
+  /// 国际频道 的二级 = 国家/地区（中文），常用国家优先，其余按实际出现追加
+  static const List<String> intlCountries = [
+    '美国', '英国', '日本', '韩国', '法国', '德国', '意大利', '俄罗斯',
+    '新加坡', '中国', '中国香港', '中国台湾', '阿联酋', '卡塔尔', '土耳其',
+    '印度', '西班牙', '荷兰', '澳大利亚', '加拿大', '巴西', '墨西哥', '其他',
+  ];
 
   /// 地方频道的省份顺序
   static const List<String> provinces = [
@@ -184,7 +196,8 @@ class TvCatalog {
   ];
 
   /// 央视频道 / 卫视频道：取消二级（整类平铺）
-  static bool hasSub(String top) => top == '地方频道' || top == '港澳台·国际';
+  static bool hasSub(String top) =>
+      top == '地方频道' || top == '港澳台' || top == '国际频道';
 
   final List<TvChannel> all;
   final String generatedAt;
@@ -212,9 +225,13 @@ class TvCatalog {
         final ms = ((m['ms'] ?? const []) as List<dynamic>)
             .map((e) => e is int ? e : int.tryParse(e.toString()) ?? -1)
             .toList();
+        // v2.4.0：v 数组与 urls 一一对应，1 = 流级实测可播
+        final v = (m['v'] ?? const []) as List<dynamic>;
         final lines = <TvLine>[];
         for (var i = 0; i < urls.length; i++) {
-          lines.add(TvLine(urls[i], i < ms.length ? ms[i] : -1));
+          final ok = i < v.length &&
+              (v[i] is int ? v[i] == 1 : v[i].toString() == '1');
+          lines.add(TvLine(urls[i], i < ms.length ? ms[i] : -1, verified: ok));
         }
         if (lines.isEmpty) continue;
         out.add(
@@ -233,8 +250,8 @@ class TvCatalog {
       _cached = TvCatalog(out, (meta['generatedAt'] ?? '').toString());
       return _cached!;
     } catch (e) {
-      _cached = TvCatalog.empty;
-      return _cached!;
+      // v2.2.10 修复：失败不写缓存，否则「重试」永远命中空清单
+      return TvCatalog.empty;
     }
   }
 
@@ -245,11 +262,16 @@ class TvCatalog {
       for (final c in all)
         if (c.top == top) c.sub,
     };
-    final order = top == '港澳台·国际' ? hmtSubs : provinces;
+    final order = top == '地方频道'
+        ? provinces
+        : (top == '港澳台' ? hmtSubs : intlCountries);
     final out = <String>[];
     for (final s in order) {
       if (present.contains(s)) out.add(s);
     }
+    // v2.3.0：清单里出现但不在固定顺序中的国家，按名称追加到末尾
+    final extra = present.where((s) => !order.contains(s)).toList()..sort();
+    out.addAll(extra);
     return out;
   }
 

@@ -130,8 +130,11 @@ class _FullSearchPageState extends State<FullSearchPage> {
     return out;
   }
 
+  int _searchGen = 0; // v2.2.10：新搜索抢占旧搜索
+
   Future<void> _search(String wd) async {
-    if (wd.isEmpty || _searching) return;
+    if (wd.isEmpty) return;
+    final gen = ++_searchGen;
     _focus.unfocus();
     AppStore.instance.addSearchHistory(wd);
     setState(() {
@@ -148,7 +151,7 @@ class _FullSearchPageState extends State<FullSearchPage> {
     final tasks = MacApi.instance.activeSources
         .map((s) => () async {
           final items = await MacApi.instance.searchOrNull(s, wd);
-          if (!mounted) return;
+          if (!mounted || gen != _searchGen) return;
           if (items == null) {
             setState(() {
               _done++;
@@ -201,7 +204,7 @@ class _FullSearchPageState extends State<FullSearchPage> {
           });
         }).toList();
     await MacApi.parallel(tasks, 8);
-    if (!mounted) return;
+    if (!mounted || gen != _searchGen) return;
     setState(() {
       // v1.7.0 检索完成后按分级统一排序（精确匹配优先）
       _results.sort((a, b) =>

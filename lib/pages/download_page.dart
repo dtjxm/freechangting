@@ -807,8 +807,7 @@ class _DownloadPageState extends State<DownloadPage> {
                       ],
                       const SizedBox(height: 4),
                       Padding(
-                        padding: EdgeInsets.only(
-                            left: _selectMode ? 0 : 0),
+                        padding: EdgeInsets.zero,
                         child: Text(
                           t.state == 'done'
                               ? _friendlyPath(t) // v1.9.8 友好路径

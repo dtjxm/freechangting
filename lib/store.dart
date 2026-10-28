@@ -67,7 +67,6 @@ class AppStore extends ChangeNotifier {
   static const _kHis = 'dysj_history';
   static const _kLastSource = 'dysj_last_source';
   static const _kAutoNext = 'dysj_auto_next';
-  static const _kShowOther = 'dysj_show_other';
   static const _kManualSource = 'dysj_manual_source';
   static const _kFastSource = 'dysj_fast_source';
   // ---- v2.2.4 片源管理（独立页面）----
@@ -77,7 +76,6 @@ class AppStore extends ChangeNotifier {
   static const _kSrcLastTest = 'dysj_source_last_test';
   static const _kSrcLastNet = 'dysj_source_last_net';
   static const _kSearchHis = 'dysj_search_history';
-  static const _kLiveM3u = 'dysj_live_m3u';
   static const _kAdSkip = 'dysj_ad_skip';
   static const _kThemeMode = 'dysj_theme_mode';
   static const _maxHistory = 300;
@@ -95,15 +93,9 @@ class AppStore extends ChangeNotifier {
   bool get autoNext => _prefs?.getBool(_kAutoNext) ?? true;
   set autoNext(bool v) => _prefs?.setBool(_kAutoNext, v);
 
-  bool get showOther => _prefs?.getBool(_kShowOther) ?? false;
-  set showOther(bool v) {
-    _prefs?.setBool(_kShowOther, v);
-    notifyListeners(); // v1.9.0：频道开关返回首页立即生效
-  }
-
   // ---- v1.7.0 首页频道（一级分类）显示开关 ----
   // 默认开启：电影、电视剧、综艺、动漫、纪录片；其余（短剧/体育/影视解说/伦理）默认关闭。
-  // 「其他」沿用旧开关 showOther 的取值，老用户设置不丢失。
+  // 「其他」大类恒隐藏（v2.2.3 起下线，不再提供开关）。
   static const bigCatDefaults = {
     'movies': true,
     'tv': true,
@@ -119,7 +111,7 @@ class AppStore extends ChangeNotifier {
 
   bool bigCatVisible(String key) {
     // v2.2.3 v11：一级「其他」大类已取消 —— 成人 / 擦边内容随之整体隐藏，恒不可见。
-    //（showOther 偏好项保留仅为兼容老用户数据，不再影响任何显示）
+    //（历史偏好项保留在 prefs 中，不再影响任何显示）
     if (key == 'other') return false;
     // v2.2.0：只读已知频道 —— 老用户 prefs 里可能残留已下线频道（如 news）的开关值，
     // 未知名目一律按关闭处理，不会被重新显示出来。
@@ -162,8 +154,6 @@ class AppStore extends ChangeNotifier {
   set disabledSourceIds(Set<int> v) {
     _prefs?.setString(_kDisabledSrc, jsonEncode(v.toList()..sort()));
   }
-
-  bool isSourceEnabled(int id) => !disabledSourceIds.contains(id);
 
   /// 最近一次测速结果：片源 id → 毫秒（失败的不在表内）
   Map<int, int> get sourceLatency {
@@ -311,16 +301,11 @@ class AppStore extends ChangeNotifier {
     notifyListeners();
   }
 
+  // v2.2.10 修复：prefs 初始化失败时不应崩，与其他读写保持 ?. 一致
   Future<void> _saveFav() async =>
-      _prefs!.setString(_kFav, jsonEncode(_favorites.map((e) => e.toMap()).toList()));
+      _prefs?.setString(_kFav, jsonEncode(_favorites.map((e) => e.toMap()).toList()));
   Future<void> _saveHis() async =>
-      _prefs!.setString(_kHis, jsonEncode(_history.map((e) => e.toMap()).toList()));
-
-  /// v1.3.0 直播源最后成功拉取的 M3U 内容（离线兜底）
-  String get liveM3uCache => _prefs?.getString(_kLiveM3u) ?? '';
-  set liveM3uCache(String v) {
-    if (v.isNotEmpty) _prefs?.setString(_kLiveM3u, v);
-  }
+      _prefs?.setString(_kHis, jsonEncode(_history.map((e) => e.toMap()).toList()));
 
   /// v2.2.0 去广告（**清单净化**）：在线播放前先把 m3u8 里的广告分片删掉，
   /// 再把净化后的清单交给播放器 —— 不是快进跳过，分片是真的没有拉取。
@@ -387,34 +372,4 @@ class AppStore extends ChangeNotifier {
 
   int get lastSourceId => _prefs?.getInt(_kLastSource) ?? -1;
   set lastSourceId(int v) => _prefs?.setInt(_kLastSource, v);
-
-  // ---- v1.8.0 检索页筛选状态记忆（大类/排序/地区/风格/年份） ----
-  static const _kBrowse = 'dysj_browse_state';
-  Map<String, Object?>? _browseCache;
-
-  Map<String, Object?> _browse() {
-    if (_browseCache == null) {
-      try {
-        final raw = _prefs?.getString(_kBrowse) ?? '';
-        _browseCache = raw.isEmpty
-            ? <String, Object?>{}
-            : (jsonDecode(raw) as Map).cast<String, Object?>();
-      } catch (_) {
-        _browseCache = <String, Object?>{};
-      }
-    }
-    return _browseCache!;
-  }
-
-  Object? browseValue(String key) => _browse()[key];
-
-  void setBrowseValue(String key, Object? v) {
-    final m = _browse();
-    if (v == null) {
-      m.remove(key);
-    } else {
-      m[key] = v;
-    }
-    _prefs?.setString(_kBrowse, jsonEncode(m));
-  }
 }

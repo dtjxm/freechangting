@@ -36,8 +36,10 @@ class _LatestPageState extends State<LatestPage> {
   @override
   void didUpdateWidget(covariant LatestPage oldWidget) {
     super.didUpdateWidget(oldWidget);
-    // 首次切到本 Tab 才加载；之后切走再回来保留已有结果，不重复请求
-    if (widget.active && !oldWidget.active && !_loadedOnce && !_loading) {
+    // 首次切到本 Tab 才加载；之后切走再回来保留已有结果，不重复请求。
+    // ⚠️ 修复：原条件含 `!_loading`，但 `_loading` 初始就是 true，导致首次切换
+    // 永远不触发加载 →「最新」页一直转圈。改成只看 `!_loadedOnce`。
+    if (widget.active && !oldWidget.active && !_loadedOnce) {
       _load();
     }
   }

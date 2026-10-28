@@ -173,12 +173,3 @@ class _UpdateSheetState extends State<UpdateSheet> {
   }
 }
 
-/// 启动静默检查用的简化入口（与 [UpdateSheet] 相同，只是保留 `version.dart` 引用占位，
-/// 避免 main.dart 额外 import 一堆）。实际上直接复用 [UpdateSheet] 即可。
-class UpdateSheetForBoot extends StatelessWidget {
-  final UpdateInfo info;
-  const UpdateSheetForBoot({super.key, required this.info});
-
-  @override
-  Widget build(BuildContext context) => UpdateSheet(info: info);
-}

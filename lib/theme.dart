@@ -6,7 +6,6 @@ import 'package:flutter/material.dart';
 /// LOGO 提取色
 const kBrand = Color(0xFFF0801F); // LOGO 橙（主色）
 const kGold = Color(0xFFF2B33D); // LOGO 金（辅色）
-const kBrandDeep = Color(0xFFD9541E); // 深橙红（标签/警示）
 const kBrandWeakLight = Color(0xFFFDEBD7); // 浅色主题弱底
 const kBrandWeakDark = Color(0xFF3B2A16); // 深色主题弱底
 

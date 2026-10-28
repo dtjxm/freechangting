@@ -429,10 +429,8 @@ class DownloadService extends ChangeNotifier {
   /// 用片名在最快的 1~2 个片源里精确匹配，取回 typeName（软件二级分类）
   Future<String?> _lookupSubcat(String name) async {
     final api = MacApi.instance;
-    final cands = <MovieSource>[
-      api.defaultSource,
-      ...api.sources.take(2),
-    ];
+    // v2.2.10（C1）：defaultSource 就是 sources.first，原写法会重复查同一源
+    final cands = api.activeSources.take(3).toList();
     for (final s in cands) {
       if (s.url.isEmpty) continue;
       try {
@@ -461,12 +459,6 @@ class DownloadService extends ChangeNotifier {
       }
     }
     return null;
-  }
-
-  /// 已下载完成（用于详情页/播放页标记）
-  bool isDone(int sourceId, String vodId, int epIndex) {
-    final t = taskOf(sourceId, vodId, epIndex);
-    return t != null && t.state == 'done';
   }
 
   /// 真正的批量入队：每集一条任务（已存在且未失败的任务跳过）
@@ -635,7 +627,7 @@ class DownloadService extends ChangeNotifier {
   }
 
   /// v2.2.2（B2）立即落盘：取消防抖定时器并直写最新快照 ——
-  /// 供 clearDone / delete / 恢复 等「改完必须立刻持久化」的场景使用。
+  /// 供 delete / 恢复 等「改完必须立刻持久化」的场景使用。
   void _persistNow() {
     _persistTimer?.cancel();
     _persistTimer = null;
@@ -760,7 +752,10 @@ class DownloadService extends ChangeNotifier {
 
   Directory _taskDir(Directory cache, DownloadTask t) {
     final dirName = t.id.replaceAll(RegExp(r'[^A-Za-z0-9]'), '_');
-    return Directory('${cache.path}/dl/$dirName');
+    // v2.2.10 修复 P0：换线路（attempts 递增）后使用独立分段目录，
+    // 否则续传会把上一条线路的 seg_*.ts 当成「已下载」复用，成片花屏/错位。
+    final epoch = t.attempts > 0 ? '_a${t.attempts}' : '';
+    return Directory('${cache.path}/dl/$dirName$epoch');
   }
 
   /// v2.0 实时统计：per-task 字节/时间快照 + 单一全局节拍器（每秒一拍），
@@ -959,6 +954,17 @@ class DownloadService extends ChangeNotifier {
     t.state = 'waiting';
     _notify();
     _persist();
+    // v2.2.10：清掉上一轮的分段目录，避免缓存无限增长（失败忽略）
+    final prev = t.attempts - 1;
+    unawaited(() async {
+      try {
+        final cache = await getTemporaryDirectory();
+        final name = t.id.replaceAll(RegExp(r'[^A-Za-z0-9]'), '_') +
+            (prev > 0 ? '_a$prev' : '');
+        final d = Directory('${cache.path}/dl/$name');
+        if (await d.exists()) await d.delete(recursive: true);
+      } catch (_) {}
+    }());
   }
 
   // ---------- 清单解析 ----------
@@ -1324,48 +1330,6 @@ class DownloadService extends ChangeNotifier {
     }
   }
 
-  /// v1.6.1 一键重试全部失败任务
-  int retryAllFailed() {
-    var n = 0;
-    for (final t in tasks) {
-      if (t.state == 'failed') {
-        t.state = 'waiting';
-        t.error = null;
-        t.attempts = 0;
-        n++;
-      }
-    }
-    if (n > 0) {
-      _notify();
-      _persist();
-      pump();
-    }
-    return n;
-  }
-
-  /// v1.6.1 一键删除全部失败任务
-  int deleteFailed() {
-    final failed = tasks.where((t) => t.state == 'failed').toList();
-    for (final t in failed) {
-      t.state = 'deleted';
-      tasks.remove(t);
-      _stats.remove(t.id);
-      // 失败任务残留的分段一并清理，避免缓存堆积
-      () async {
-        try {
-          final cache = await getTemporaryDirectory();
-          final dir = _taskDir(cache, t);
-          if (await dir.exists()) await dir.delete(recursive: true);
-        } catch (_) {}
-      }();
-    }
-    if (failed.isNotEmpty) {
-      _notify();
-      _persistNow();
-    }
-    return failed.length;
-  }
-
   /// v1.6.1 下载中预览：用已下载的分段拼一个本地 m3u8（ExoPlayer 可直接播），
   /// 返回播放列表路径；无可用分段或 mp4 直链任务返回 null
   Future<String?> buildPreview(DownloadTask t) async {
@@ -1431,6 +1395,10 @@ class DownloadService extends ChangeNotifier {
       fileOk = r.$1;
       if (!fileOk) failed.addAll(r.$2);
     }
+    // v2.2.10 修复 P0：只有该片名已无其他任务时才清目录，
+    // 否则「删除本集」会把同片其余集数的文件一起删掉（tasks 里已移除本任务）。
+    final others = tasks.where((x) => x.movieName == t.movieName && x.id != t.id);
+    if (others.isNotEmpty) return (fileOk, failed);
     // 目录级清理：把该片名下所有残留（含子目录）一并清掉
     final folder = await _deleteFolder('电影世界/${_sanitize(t.movieName)}');
     if (folder.$1) {
@@ -1520,9 +1488,4 @@ class DownloadService extends ChangeNotifier {
     return (list.length, false, failed);
   }
 
-  void clearDone() {
-    tasks.removeWhere((t) => t.state == 'done');
-    _notify();
-    _persistNow();
-  }
 }

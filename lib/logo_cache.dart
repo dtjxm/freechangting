@@ -15,6 +15,7 @@
 ///   · `http(s)://…`          → 网络台标，走本地缓存（下载一次，之后离线可用）。
 library;
 
+import 'dart:async';
 import 'dart:io';
 
 import 'package:flutter/material.dart';
@@ -144,6 +145,4 @@ class LogoCache {
     }
   }
 
-  /// fire-and-forget
-  static void unawaited(Future<void> f) {}
 }

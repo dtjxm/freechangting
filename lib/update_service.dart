@@ -126,8 +126,10 @@ class UpdateService {
   /// 返回结果供调用方决定是否弹窗。
   Future<(CheckResult, UpdateInfo?)> check({bool silent = false}) async {
     final m = await fetchManifest();
+    // v2.2.10 修复：拉不到清单是「检查失败」，不能报成「已是最新版本」
+    if (m == null) return (CheckResult.error, null);
     if (!isNewer(m)) return (CheckResult.latest, m);
-    if (silent && await skippedVersion >= m!.versionCode) {
+    if (silent && await skippedVersion >= m.versionCode) {
       return (CheckResult.skipped, m);
     }
     return (CheckResult.available, m);

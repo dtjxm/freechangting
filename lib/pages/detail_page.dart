@@ -166,6 +166,35 @@ class _DetailPageState extends State<DetailPage> {
     );
   }
 
+  // ===== v2.4.0 小窗播放 =====
+  // PlayerPage 以 embedded 模式挂在详情页树上；GlobalKey 保证小窗 ↔ 全屏
+  // 之间搬动 Widget 时 State 不重建（播放器不中断、进度不丢）。
+  final GlobalKey _playerKey = GlobalKey();
+  bool _playerStarted = false;
+  bool _playerFullscreen = false;
+  int _pGroup = 0;
+  int _pEp = 0;
+  Duration? _pPos;
+
+  /// 由详情页构造内嵌播放器。每次 build 重新构造 widget 是无害的：
+  /// GlobalKey 相同 → Element/State 复用，controller 不会重建。
+  Widget _buildInlinePlayer() {
+    final d = _detail;
+    if (d == null) return const SizedBox.shrink();
+    return PlayerPage(
+      key: _playerKey,
+      source: _source,
+      detail: d,
+      groupIndex: _pGroup,
+      epIndex: _pEp,
+      initialPosition: _pPos,
+      embedded: true,
+      fullscreen: _playerFullscreen,
+      onExitFullscreen: () => setState(() => _playerFullscreen = false),
+      onToggleFullscreen: () => setState(() => _playerFullscreen = true),
+    );
+  }
+
   void _play(int group, int ep) {
     final d = _detail!;
     // v1.5.7 续播修复：同线路同集时恢复上次播放进度（时间点），
@@ -178,24 +207,32 @@ class _DetailPageState extends State<DetailPage> {
         h.positionSec > 30) {
       pos = Duration(seconds: h.positionSec);
     }
-    Navigator.of(context)
-        .push(MaterialPageRoute(
-      builder: (_) => PlayerPage(
-        source: _source,
-        detail: d,
-        groupIndex: group,
-        epIndex: ep,
-        initialPosition: pos,
-      ),
-    ))
-        .then((_) => _load());
+    // v2.4.0：不再 push 独立播放页，改为在详情页内以小窗起播；
+    // 点小窗全屏按钮才铺满整屏，退出全屏回到小窗且播放不中断。
+    setState(() {
+      _playerStarted = true;
+      _playerFullscreen = false;
+      _pGroup = group;
+      _pEp = ep;
+      _pPos = pos;
+    });
   }
 
   @override
   Widget build(BuildContext context) {
     final d = _detail;
-    // v2.1 收藏入口只保留按钮区一处（此前 AppBar 与按钮区各有一个，重复）
-    return Scaffold(
+    // v2.4.0：全屏时拦截系统返回键 → 先退出全屏（回到小窗），不直接退出详情页
+    return PopScope(
+      canPop: !_playerFullscreen,
+      onPopInvokedWithResult: (didPop, _) {
+        if (!didPop && _playerFullscreen) {
+          setState(() => _playerFullscreen = false);
+        }
+      },
+      child: Stack(
+        children: [
+          // v2.1 收藏入口只保留按钮区一处（此前 AppBar 与按钮区各有一个，重复）
+          Scaffold(
       appBar: AppBar(
         title: Text(widget.item.name, style: const TextStyle(fontSize: 17)),
       ),
@@ -217,6 +254,11 @@ class _DetailPageState extends State<DetailPage> {
                   ),
                 )
               : _buildBody(d),
+          ),
+          if (_playerStarted && _playerFullscreen)
+            Positioned.fill(child: _buildInlinePlayer()),
+        ],
+      ),
     );
   }
 
@@ -258,6 +300,13 @@ class _DetailPageState extends State<DetailPage> {
   /// 上部播放区：黑底、海报居中、中央大播放按钮、底部片名 + 元信息。
   /// 有续播 → 中央按钮下方加「继续播放第 N 集」提示，点击从记录位置续播。
   Widget _buildPlayArea(VideoDetail d, HistoryEntry? h, bool resume) {
+    // v2.4.0：已起播 → 原位换成小窗（同一 GlobalKey，滚动时跟着列表走）
+    if (_playerStarted && !_playerFullscreen) {
+      return SizedBox(
+        height: 240,
+        child: _KeepAlive(child: _buildInlinePlayer()),
+      );
+    }
     final meta = [
       d.item.typeName,
       if (d.year.isNotEmpty) d.year,
@@ -413,6 +462,12 @@ class _DetailPageState extends State<DetailPage> {
         return;
       }
       await _showShareSheet(bytes);
+    } catch (e) {
+      // v2.2.10：分享失败给出可见提示，不再抛未捕获异步异常
+      if (mounted) {
+        ScaffoldMessenger.of(context)
+            .showSnackBar(SnackBar(content: Text('分享失败：$e')));
+      }
     } finally {
       if (mounted) setState(() => _sharing = false);
     }
@@ -865,5 +920,30 @@ class _DetailPageState extends State<DetailPage> {
         ),
       ),
     );
+  }
+}
+
+/// v2.4.0：小窗播放器必须常驻，不能被 ListView 回收。
+///
+/// 详情页是长列表，滚动到简介/剧集区时播放区会滑出视口；ListView 默认会销毁
+/// 不可见子项 —— 那会让 PlayerPage 被 dispose、视频直接停掉。这里用
+/// AutomaticKeepAlive 让它在整个详情页生命周期内保持挂载。
+class _KeepAlive extends StatefulWidget {
+  final Widget child;
+  const _KeepAlive({required this.child});
+
+  @override
+  State<_KeepAlive> createState() => _KeepAliveState();
+}
+
+class _KeepAliveState extends State<_KeepAlive>
+    with AutomaticKeepAliveClientMixin {
+  @override
+  bool get wantKeepAlive => true;
+
+  @override
+  Widget build(BuildContext context) {
+    super.build(context);
+    return widget.child;
   }
 }

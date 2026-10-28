@@ -303,8 +303,10 @@ class _HomePageState extends State<HomePage> {
         }
         // v2.2.1：区分「请求失败」与「空页」—— 失败先重试一次再考虑换源，
         // 避免一次网络抖动就把该片源在本 Tab 里永久跳过。
-        lp ??= await MacApi.instance.listPageOrNull(src, _typeId, _page);
-        lp ??= await MacApi.instance.listPageOrNull(src, _typeId, _page);
+        // v2.2.10：显式重试一次（等价原逻辑，意图更清楚）
+        for (var attempt = 0; attempt < 2 && lp == null; attempt++) {
+          lp = await MacApi.instance.listPageOrNull(src, _typeId, _page);
+        }
         if (lp == null) {
           if (!await _advanceSource()) break;
           continue;

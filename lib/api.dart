@@ -139,7 +139,7 @@ class MacApi {
   }
 
   Future<Map<String, dynamic>?> _getJson(String url,
-      {Map<String, String>? query}) async {
+      {Map<String, String>? query, Duration? timeout}) async {
     try {
       final resp = await _client
           .get(_buildUri(url, query ?? const {}),
@@ -147,7 +147,7 @@ class MacApi {
                 'User-Agent': _ua,
                 'Accept': 'application/json, text/plain, */*',
               })
-          .timeout(_timeout);
+          .timeout(timeout ?? _timeout);
       if (resp.statusCode != 200) return null;
       return decodeJsonObject(resp.body);
     } catch (_) {
@@ -325,6 +325,8 @@ class MacApi {
 
   static const _catMatch = {
     'documentary': ['纪录片', '记录片', '纪实', '科教', '科普'],
+    // v2.3.0（U3）：'都市' / '民国' / '恋爱' 等泛词归短剧是**产品口径**（靳老师确认），
+    // 源站的「都市剧场」「民国剧」也按短剧收录，勿改成电视剧。
     'shortdrama': ['短剧', '爽剧', '漫剧', 'AI', '女频', '恋爱', '言情', '反转', '仙侠', '穿越', '都市', '脑洞', '总裁', '民国', '闪婚', '逆袭'],
     'movies': ['电影', '动作', '喜剧', '爱情', '科幻', '恐怖', '剧情', '战争', '悬疑', '惊悚', '犯罪', '冒险', '奇幻', '大片', '灾难', '历史', '古装', '家庭', '西部', '邵氏', '武侠'],
     'tv': ['电视剧', '连续剧', '港剧', '台剧', '韩剧', '日剧', '美剧', '泰剧', '英剧', '国产剧', '海外剧', '韩国剧', '日本剧', '台湾剧', '香港剧', '美国剧', '泰国剧', '大陆剧', '其他剧', '自制剧', '剧集', '内地剧'],
@@ -437,7 +439,7 @@ class MacApi {
   }
 
   /// v1.7.0 智能特征兜底：影片自身类型名标注不可信时，
-  /// 用备注集数 / 风格标签推断真实大类（返回 '' 表示推断不出）
+  /// 用备注集数 / 风格标签推断真实大类（推断不出时返回 'other'）
   static String inferCat(VideoItem it) {
     final rm = it.remarks;
     // 连续剧特征：更新至XX集 / 共XX集 / 全XX集（2 集以上算剧）
@@ -614,22 +616,16 @@ class MacApi {
       _getJson(s.url, query: {'ac': 'detail', 't': typeId, 'pg': '$pg'})
           .then((o) => _parseItems(o, s));
 
-  /// v1.4.0：列表页（带该查询实际总页数，供跨源续页用）
-  Future<ListPage> listPage(MovieSource s, String typeId, int pg) async {
-    final obj = await _getJson(s.url, query: {'ac': 'detail', 't': typeId, 'pg': '$pg'});
-    final items = _parseItems(obj, s);
-    final pc = int.tryParse('${obj?['pagecount'] ?? 1}') ?? 1;
-    return ListPage(items, pc);
-  }
-
   /// v2.2.1：列表页（可空版）—— 严格区分「请求失败」与「该分类没内容」。
   /// 失败返回 null，调用方可重试或换源；成功返回实际结果（**可能**是空页）。
   ///
   /// 原实现里 `_getJson` 失败 → 解析出空列表 → 被上层当成「该源该分类无片」
   /// 直接换源；一次网络抖动/慢响应就让该片源在本 Tab 里**永不再被加载**，
   /// 表现出来就是「片源地址没失效，但分类下什么都没有」。
-  Future<ListPage?> listPageOrNull(MovieSource s, String typeId, int pg) async {
-    final obj = await _getJson(s.url, query: {'ac': 'detail', 't': typeId, 'pg': '$pg'});
+  Future<ListPage?> listPageOrNull(MovieSource s, String typeId, int pg,
+      {Duration timeout = const Duration(seconds: 8)}) async {
+    final obj = await _getJson(s.url,
+        query: {'ac': 'detail', 't': typeId, 'pg': '$pg'}, timeout: timeout);
     if (obj == null) return null;
     final pc = int.tryParse('${obj['pagecount'] ?? 1}') ?? 1;
     return ListPage(_parseItems(obj, s), pc);
