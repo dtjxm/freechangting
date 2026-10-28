@@ -1,11 +1,11 @@
 {
-  "versionCode": 25,
-  "versionName": "1.2.0",
+  "versionCode": 28,
+  "versionName": "1.2.3",
   "url": "https://ghfast.top/https://raw.githubusercontent.com/dtjxm/freechangting/main/app-release.apk",
-  "size": 3131563,
-  "md5": "be532bf6fb82166da44fdcbeb6fe8f56",
-  "sha256": "a51c575904642074979ae65c5cf1100a7db3b529e5d4b2836a9d7fca8ffb2b4a",
-  "note": "广播全量升级：117 → 143 个电台，每条线路都实测过能播。新增央广卫星流（北京新闻、上海第一财经、福建新闻/经济、甘肃都市/经济、吉林乡村、音乐现场等）与香港电台（第一台/第二台/第五台、香港之声）；地区分类扩到九大区，补上北京/吉林/安徽/甘肃。",
+  "size": 3136466,
+  "md5": "10dffb69c9a838b9f6b0c1c39dc7b062",
+  "sha256": "ac21f20a467f4e50ad47d24dab57ed7d908b4d14b8903c2a13e23a33cdc6ed37",
+  "note": "剔除两个「能拉到清单、却放不出声」的国际台（MBC FM / Arirang Radio）—— 它们的 m3u8 都能正常取回，但在 Android WebView + hls.js 上一个分片都不请求，点进去只有静音，对用户等价于死链。已用独立 <video> 承载、关掉 Worker 两种方式复测，仍无声音，故不再收录。电台总数 143 → 141，地区 32 → 30（内地 29 省市区 + 香港），地区抽屉从九大区回到八大区；无 http 明文线路残留。",
   "force": false,
-  "publishedAt": "2026-10-18T15:20:11.741Z"
+  "publishedAt": "2026-10-28T17:16:52.892Z"
 }
