@@ -46,3 +46,8 @@ app.*.map.json
 
 # Widget Preview related
 .widget_preview/
+
+# 本地工具状态 / 临时样本（v2.4.0 清理，仅移出版本控制，文件仍在本地）
+.flutter_tool_state
+android/local.properties.bak_*
+/live_cats_sample.json
