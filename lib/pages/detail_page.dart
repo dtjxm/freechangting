@@ -2,6 +2,7 @@
 library;
 
 import 'dart:typed_data';
+import 'dart:ui' as ui;
 
 import 'package:collection/collection.dart';
 import 'package:flutter/material.dart';
@@ -174,6 +175,9 @@ class _DetailPageState extends State<DetailPage> {
   bool _playerFullscreen = false;
   int _pGroup = 0;
   int _pEp = 0;
+  /// v2.4.3：选集联动 token —— 小窗已起播时，点下方剧集只递增它，
+  /// 由已存在的播放器自行切集（不重建页面、不中断）。
+  int _epToken = 0;
   Duration? _pPos;
 
   /// 由详情页构造内嵌播放器。每次 build 重新构造 widget 是无害的：
@@ -190,8 +194,20 @@ class _DetailPageState extends State<DetailPage> {
       initialPosition: _pPos,
       embedded: true,
       fullscreen: _playerFullscreen,
+      jumpGroup: _pGroup,
+      jumpEp: _pEp,
+      jumpToken: _epToken,
       onExitFullscreen: () => setState(() => _playerFullscreen = false),
       onToggleFullscreen: () => setState(() => _playerFullscreen = true),
+      // v2.4.4：播放器实际换集（含自动联播）→ 同步高亮
+      onEpisodeChanged: (g, e) {
+        if (!mounted) return;
+        if (g == _pGroup && e == _pEp) return;
+        setState(() {
+          _pGroup = g;
+          _pEp = e;
+        });
+      },
     );
   }
 
@@ -255,6 +271,18 @@ class _DetailPageState extends State<DetailPage> {
                 )
               : _buildBody(d),
           ),
+          // v2.4.1：小窗固定在 AppBar 下方，不随列表滚动
+          if (_playerStarted && !_playerFullscreen)
+            Positioned(
+              top: MediaQuery.of(context).padding.top + kToolbarHeight,
+              left: 0,
+              right: 0,
+              height: 240,
+              child: ColoredBox(
+                color: Colors.black,
+                child: _buildInlinePlayer(),
+              ),
+            ),
           if (_playerStarted && _playerFullscreen)
             Positioned.fill(child: _buildInlinePlayer()),
         ],
@@ -300,12 +328,10 @@ class _DetailPageState extends State<DetailPage> {
   /// 上部播放区：黑底、海报居中、中央大播放按钮、底部片名 + 元信息。
   /// 有续播 → 中央按钮下方加「继续播放第 N 集」提示，点击从记录位置续播。
   Widget _buildPlayArea(VideoDetail d, HistoryEntry? h, bool resume) {
-    // v2.4.0：已起播 → 原位换成小窗（同一 GlobalKey，滚动时跟着列表走）
+    // v2.4.1：已起播 → 这里只留 240 的占位高度；真正的播放器固定在 Stack 顶部，
+    // 不随列表滚动（靳老师要求：下部内容滑动不能把上部播放带走）
     if (_playerStarted && !_playerFullscreen) {
-      return SizedBox(
-        height: 240,
-        child: _KeepAlive(child: _buildInlinePlayer()),
-      );
+      return const SizedBox(height: 240);
     }
     final meta = [
       d.item.typeName,
@@ -321,11 +347,18 @@ class _DetailPageState extends State<DetailPage> {
         child: Stack(
           children: [
             // 中央海报（无图则显示占位图标）
-            Center(
-              child: d.item.pic.isNotEmpty
-                  ? NetImage(d.item.pic, width: 112, height: 156,
-                      fit: BoxFit.cover, borderRadius: BorderRadius.circular(10))
-                  : const Icon(Icons.movie_outlined, size: 64, color: Colors.white24),
+            // v2.4.6：与首页同一张图，完整显示不裁剪。
+            // 卡片尺寸固定为竖版 148x182，底层用同一张图 cover + 高斯模糊当底衬，
+            // 上层用 contain 完整显示原图 —— 既不裁边，也不会出现黑边/留白。
+            Align(
+              alignment: Alignment.topCenter,
+              child: Padding(
+                padding: const EdgeInsets.only(top: 8),
+                child: d.item.pic.isNotEmpty
+                    ? _PosterBox(d.item.pic)
+                    : const Icon(Icons.movie_outlined,
+                        size: 64, color: Colors.white24),
+              ),
             ),
             // 中央播放按钮（续播时下方加提示）
             Center(
@@ -393,6 +426,19 @@ class _DetailPageState extends State<DetailPage> {
   }
 
   /// 播放区点击 → 直接起播。有续播 → 从记录集/位置续播；否则第 1 集。
+  /// v2.4.3：点下方选集 —— 已在小窗播放就直接切集，否则首次起播
+  void _selectEpisode(int group, int ep) {
+    if (!_playerStarted) {
+      _play(group, ep);
+      return;
+    }
+    setState(() {
+      _pGroup = group;
+      _pEp = ep;
+      _epToken++;
+    });
+  }
+
   void _playFromArea(VideoDetail d, HistoryEntry? h, bool resume) {
     final eps = d.groups.isNotEmpty ? d.groups[_groupIndex].episodes : const <Episode>[];
     if (eps.isEmpty) return;
@@ -734,24 +780,38 @@ class _DetailPageState extends State<DetailPage> {
           itemCount: eps.length,
           itemBuilder: (_, i) {
             final resume = h != null && h.epIndex == i && h.positionSec > 30;
+            // v2.4.4：正在播放的那一集高亮（自动联播换集后也会跟着变）
+            final playing =
+                _playerStarted && _pGroup == _groupIndex && _pEp == i;
             final dl = DownloadService.instance
                 .taskOf(d.item.sourceId, d.item.vodId, i);
             final dlDone = dl?.state == 'done';
             return OutlinedButton(
-              onPressed: () => _play(_groupIndex, i),
+              // v2.4.3：与上部小窗联动，点了就播这一集
+              onPressed: () => _selectEpisode(_groupIndex, i),
               style: OutlinedButton.styleFrom(
                 padding: EdgeInsets.zero,
+                backgroundColor: playing ? context.brand : null,
                 side: BorderSide(
-                    color: resume ? context.gold : context.divider),
+                    width: playing ? 1.6 : 1,
+                    color: playing
+                        ? context.brand
+                        : (resume ? context.gold : context.divider)),
               ),
               child: Stack(
                 alignment: Alignment.center,
                 children: [
                   Text(
-                    resume ? '▶ ${eps[i].name}' : eps[i].name,
+                    (resume && !playing)
+                        ? '▶ ${eps[i].name}'
+                        : eps[i].name,
                     maxLines: 1,
                     overflow: TextOverflow.ellipsis,
-                    style: const TextStyle(fontSize: 12),
+                    style: TextStyle(
+                      fontSize: 12,
+                      color: playing ? Colors.white : null,
+                      fontWeight: playing ? FontWeight.w600 : null,
+                    ),
                   ),
                   if (dlDone)
                     Positioned(
@@ -923,27 +983,42 @@ class _DetailPageState extends State<DetailPage> {
   }
 }
 
-/// v2.4.0：小窗播放器必须常驻，不能被 ListView 回收。
+/// v2.4.6：详情页未播放时的海报卡。
 ///
-/// 详情页是长列表，滚动到简介/剧集区时播放区会滑出视口；ListView 默认会销毁
-/// 不可见子项 —— 那会让 PlayerPage 被 dispose、视频直接停掉。这里用
-/// AutomaticKeepAlive 让它在整个详情页生命周期内保持挂载。
-class _KeepAlive extends StatefulWidget {
-  final Widget child;
-  const _KeepAlive({required this.child});
+/// 只做「完整显示」——外层卡片是竖版 148x182，原图按 contain 等比缩放完整放进卡片；
+/// 卡片里空出来的部分用**同一张图放大模糊**垫底，所以既不会裁掉画面边缘，
+/// 也不会出现难看的黑边/白边，视觉上与首页海报是同一张图。
+class _PosterBox extends StatelessWidget {
+  final String url;
+  const _PosterBox(this.url);
 
-  @override
-  State<_KeepAlive> createState() => _KeepAliveState();
-}
-
-class _KeepAliveState extends State<_KeepAlive>
-    with AutomaticKeepAliveClientMixin {
-  @override
-  bool get wantKeepAlive => true;
+  static const double _w = 148;
+  static const double _h = 182;
 
   @override
   Widget build(BuildContext context) {
-    super.build(context);
-    return widget.child;
+    return ClipRRect(
+      borderRadius: BorderRadius.circular(10),
+      child: SizedBox(
+        width: _w,
+        height: _h,
+        child: Stack(
+          fit: StackFit.expand,
+          children: [
+            // 底衬：同一张图铺满 + 模糊 + 压暗（边缘被裁也无所谓，只为填色）
+            NetImage(url, fit: BoxFit.cover),
+            BackdropFilter(
+              filter: ui.ImageFilter.blur(sigmaX: 16, sigmaY: 16),
+              child: ColoredBox(color: Colors.black.withValues(alpha: 0.52)),
+            ),
+            // 主体：完整显示原图，不裁任何一边
+            Padding(
+              padding: const EdgeInsets.all(4),
+              child: NetImage(url, fit: BoxFit.contain),
+            ),
+          ],
+        ),
+      ),
+    );
   }
 }

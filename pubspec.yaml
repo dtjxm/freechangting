@@ -19,7 +19,7 @@ publish_to: 'none' # Remove this line if you wish to publish to pub.dev
 # v2.2.9：build 号取 2057 而不是 57。v2.2.3~v2.2.6 用 split 包时
 # versionCode 已被 Flutter 加过 2000（2051~2054），v2.2.7/2.2.8 又回落到
 # 55/56；取 2057 可同时高于这两条线，保证 2.2.6/2.2.7/2.2.8 都能直接升级。
-version: 2.4.0+2060
+version: 2.4.6+2066
 
 environment:
   sdk: ^3.13.2
@@ -84,7 +84,7 @@ flutter:
   assets:
     - assets/icon.png
     - assets/sources.json
-    - assets/live_tv_channels.json  # v2.4.0 直播清单（940 台 / 2,261 条，含流级实测可播标记 v）
+    - assets/live_tv_channels.json  # v2.4.1 直播清单（1,498 台 / 2,819 条，含 532 个补充地方台）
     # v2.2.7 修复（缺陷 6）：央视台标离线内置 —— 资产里以 `asset:cctv1.png` 引用，
     # 加载优先级：本地内置 → 网络（本地缓存） → 首字色块
     - assets/logos/cctv/

@@ -42,6 +42,16 @@ class PlayerPage extends StatefulWidget {
   /// 内嵌模式：点小窗上的「全屏」按钮时的回调。
   final VoidCallback? onToggleFullscreen;
 
+  /// v2.4.3：详情页点下方选集时的联动请求。每次点击 token 自增，
+  /// 已存在的播放器在 didUpdateWidget 里切集并起播，不用重建页面。
+  final int jumpGroup;
+  final int jumpEp;
+  final int jumpToken;
+
+  /// v2.4.4：实际开始播放某一集时回调（含自动联播跳到下一集）。
+  /// 详情页据此把「正在播放」的选集按钮高亮，避免高亮与实际播放脱节。
+  final void Function(int group, int ep)? onEpisodeChanged;
+
   const PlayerPage({
     super.key,
     required this.source,
@@ -53,6 +63,10 @@ class PlayerPage extends StatefulWidget {
     this.fullscreen = false,
     this.onExitFullscreen,
     this.onToggleFullscreen,
+    this.jumpGroup = 0,
+    this.jumpEp = 0,
+    this.jumpToken = 0,
+    this.onEpisodeChanged,
   });
 
   @override
@@ -67,6 +81,12 @@ class _PlayerPageState extends State<PlayerPage> with WidgetsBindingObserver {
   int _playGen = 0;
   String? _error;
   bool _showControls = true;
+  int _notifiedGroup = -1;
+  int _notifiedEp = -1;
+
+  /// v2.4.1：小窗点「播放」后短暂显示「播放中」交互动画
+  bool _playFlash = false;
+  Timer? _flashTimer;
   Timer? _hideTimer;
   double? _dragStartBrightness;
   double? _dragStartVolume;
@@ -94,6 +114,10 @@ class _PlayerPageState extends State<PlayerPage> with WidgetsBindingObserver {
   // v1.5.4 线路自动切换：播放失败自动换下一条线路，全部失败才提示换源
   final Set<int> _triedLines = {};
   bool _autoSwitching = false;
+
+  /// v2.4.3：自动联播只触发一次 —— isCompleted 会连续多个 tick 为 true，
+  /// 原实现可能一次播完连跳好几集。
+  bool _autoNextFired = false;
 
   // v2.2.8 点播回退状态机：
   //   线路失败 → 本片源其余线路 → 同名搜索换源（最多 3 个）→ 明确报错。
@@ -238,6 +262,19 @@ class _PlayerPageState extends State<PlayerPage> with WidgetsBindingObserver {
   void didUpdateWidget(PlayerPage old) {
     super.didUpdateWidget(old);
     if (widget.fullscreen != old.fullscreen) _applyOrientation();
+    // v2.4.3：详情页点了另一集 → 直接在这里切集起播，保证上下联动
+    if (widget.jumpToken != old.jumpToken) {
+      final groups = _detail.groups;
+      if (groups.isNotEmpty) {
+        final g = widget.jumpGroup.clamp(0, groups.length - 1);
+        final eps = groups[g].episodes;
+        if (eps.isNotEmpty) {
+          _group = g;
+          _ep = widget.jumpEp.clamp(0, eps.length - 1);
+          unawaited(_play(null));
+        }
+      }
+    }
   }
 
   /// 起播当前 [from] 位置。
@@ -259,6 +296,13 @@ class _PlayerPageState extends State<PlayerPage> with WidgetsBindingObserver {
       _failHint = '';
     }
     _sourceHealthTimer?.cancel();
+    _autoNextFired = false;
+    // v2.4.4：把「当前播放的集」同步给详情页（自动联播换集也会走到这里）
+    if (_group != _notifiedGroup || _ep != _notifiedEp) {
+      _notifiedGroup = _group;
+      _notifiedEp = _ep;
+      widget.onEpisodeChanged?.call(_group, _ep);
+    }
     final gen = ++_playGen; // v1.9.9 本轮播放代号
     setState(() {
       _initialized = false;
@@ -585,10 +629,15 @@ class _PlayerPageState extends State<PlayerPage> with WidgetsBindingObserver {
     if (v.value.isCompleted && mounted) {
       // 自动下一集（可在设置中关闭）
       final eps = _detail.groups[_group].episodes;
-      if (_ep + 1 < eps.length && AppStore.instance.autoNext) {
+      if (!_autoNextFired &&
+          _ep + 1 < eps.length &&
+          AppStore.instance.autoNext) {
+        _autoNextFired = true;
         setState(() => _ep++);
         _play(null);
       }
+    } else if (!v.value.isCompleted) {
+      _autoNextFired = false;
     }
     // v2.2.2（A3）：时间戳节流省流 —— 每 10 秒最多记一次，且不会因回调落在
     // 非整 10 秒而漏记（原 `pos % 10 == 0` 会漏记，且写盘过于频繁）
@@ -636,6 +685,57 @@ class _PlayerPageState extends State<PlayerPage> with WidgetsBindingObserver {
   void _toggleControls() {
     setState(() => _showControls = !_showControls);
     if (_showControls) _armHide();
+  }
+
+  /// v2.4.1：点击规则（全屏 / 小窗统一）
+  ///  · 全屏且控件隐藏 → 这一次只负责呼出控件
+  ///  · 回调出后再点中部 → 播放 / 暂停
+  ///  · 点左右两侧 → 显隐控件（不影响播放状态）
+  /// 小窗控件常显，所以点中部直接就是播放 / 暂停。
+  void _onTapUp(TapUpDetails d) {
+    final size = context.size;
+    final w = size?.width ?? 1;
+    final h = size?.height ?? 1;
+    final mini = widget.embedded && !widget.fullscreen;
+    // 小窗底部进度条区域交给 Slider，不当作播放/暂停
+    if (mini && d.localPosition.dy > h - 52) return;
+    // 控件隐藏时，第一次点击只负责呼出；再点中部才切换播放（全屏/小窗统一）
+    if (!_showControls) {
+      setState(() => _showControls = true);
+      _armHide();
+      return;
+    }
+    final center =
+        d.localPosition.dx > w * 0.28 && d.localPosition.dx < w * 0.72;
+    if (mini || center) {
+      _togglePlay();
+    } else {
+      setState(() => _showControls = !_showControls);
+      if (_showControls) _armHide();
+    }
+  }
+
+  Future<void> _togglePlay() async {
+    final vp = _vp;
+    if (vp == null || !vp.value.isInitialized) return;
+    if (vp.value.isPlaying) {
+      await vp.pause();
+    } else {
+      await vp.play();
+      _flashPlaying();
+    }
+    if (mounted) setState(() {});
+    _armHide();
+  }
+
+  /// 小窗点播放后展示约 1.1 秒「播放中」
+  void _flashPlaying() {
+    if (!widget.embedded || widget.fullscreen) return;
+    _flashTimer?.cancel();
+    setState(() => _playFlash = true);
+    _flashTimer = Timer(const Duration(milliseconds: 1100), () {
+      if (mounted) setState(() => _playFlash = false);
+    });
   }
 
   Future<void> _seekRelative(int seconds) async {
@@ -739,6 +839,7 @@ class _PlayerPageState extends State<PlayerPage> with WidgetsBindingObserver {
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
     _hintTimer?.cancel();
+    _flashTimer?.cancel();
     _playGen++; // v1.9.9：作废尚未完成的播放请求，过期控制器只自弃不碰页面
     _hideTimer?.cancel();
     _holdTimer?.cancel();
@@ -770,7 +871,7 @@ class _PlayerPageState extends State<PlayerPage> with WidgetsBindingObserver {
     final mini = widget.embedded && !widget.fullscreen;
     final content = GestureDetector(
       behavior: HitTestBehavior.opaque,
-      onTap: mini ? null : _toggleControls,
+      onTapUp: _onTapUp,
       onDoubleTapDown: mini ? null : (d) => _dblX = d.localPosition.dx,
       onDoubleTap: mini
           ? null
@@ -807,7 +908,8 @@ class _PlayerPageState extends State<PlayerPage> with WidgetsBindingObserver {
                 ? _videoLayer()
                 : _error != null
                 ? buildVodError(context, _error!, () => _play(null))
-                : _buildLoading(),
+                // v2.4.6：小窗模式转圈移进中央按钮内，这里只留阶段文案
+                : _buildLoading(showSpinner: !mini),
           ),
           if (_gestureHint != null)
             Center(
@@ -828,7 +930,7 @@ class _PlayerPageState extends State<PlayerPage> with WidgetsBindingObserver {
             ),
           // 小窗用极简控制条：完整控制栏在 375dp 竖屏下会横向溢出
           if (mini)
-            _buildMiniControls()
+            _buildMiniOverlay()
           else if (_showControls)
             _buildControls(),
         ],
@@ -841,72 +943,185 @@ class _PlayerPageState extends State<PlayerPage> with WidgetsBindingObserver {
     return Scaffold(backgroundColor: Colors.black, body: content);
   }
 
-  /// v2.4.0：小窗极简控制条 —— 播放/暂停 + 片名 + 全屏。
-  Widget _buildMiniControls() {
+  /// v2.4.1：小窗交互层 —— 中央播放按钮 + 底部可拖动进度条 +「播放中」动画。
+  /// 所有可点元素都不拦截手势，点哪儿由外层 [_onTapUp] 统一判定，
+  /// 保证「第一次点击呼出、第二次切换播放」的规则在全屏和小窗一致。
+  Widget _buildMiniOverlay() {
     final vp = _vp;
     final playing = vp?.value.isPlaying ?? false;
-    return Align(
-      alignment: Alignment.bottomCenter,
-      child: Container(
-        height: 42,
-        decoration: const BoxDecoration(
-          gradient: LinearGradient(
-            begin: Alignment.topCenter,
-            end: Alignment.bottomCenter,
-            colors: [Colors.transparent, Colors.black54],
+    // v2.4.6：未起播且无错误 = 正在加载，中央按钮直接变成转圈，
+    // 不再出现"播放按钮不动、按钮下方另起一个转圈"的割裂感。
+    final loading = !_initialized && _error == null;
+    final pos = vp?.value.position ?? Duration.zero;
+    final raw = vp?.value.duration ?? Duration.zero;
+    final dur = _saneDuration(raw) ? raw : Duration.zero;
+    return Stack(
+      fit: StackFit.expand,
+      children: [
+        // 中央按钮：受控件显示态控制；播放中显示暂停图标，暂停时显示播放图标
+        Center(
+          child: IgnorePointer(
+            child: AnimatedOpacity(
+              duration: const Duration(milliseconds: 160),
+              opacity: (_showControls && !_playFlash) ? 1.0 : 0.0,
+              child: Container(
+                width: 54,
+                height: 54,
+                decoration: BoxDecoration(
+                  shape: BoxShape.circle,
+                  // 同样用不透明深色，避免在亮色画面上透色
+                  color: const Color(0xCC1A1A1A),
+                  border: Border.all(color: Colors.white70, width: 1.6),
+                ),
+                child: loading
+                    ? const Padding(
+                        padding: EdgeInsets.all(15),
+                        child: CircularProgressIndicator(
+                          strokeWidth: 2.4,
+                          color: Colors.white,
+                        ),
+                      )
+                    : Icon(
+                        playing
+                            ? Icons.pause_rounded
+                            : Icons.play_arrow_rounded,
+                        size: 32,
+                        color: Colors.white,
+                      ),
+              ),
+            ),
           ),
         ),
-        child: Row(
-          children: [
-            IconButton(
-              iconSize: 22,
-              icon: Icon(
-                playing ? Icons.pause : Icons.play_arrow,
-                color: Colors.white,
+        if (_playFlash) Center(child: _buildPlayingFlash()),
+        Positioned(
+          left: 0,
+          right: 0,
+          bottom: 0,
+          child: _buildMiniProgress(pos, dur),
+        ),
+      ],
+    );
+  }
+
+  /// 「播放中」交互动画：轻微放大的胶囊 + 转圈 + 文案
+  Widget _buildPlayingFlash() {
+    return IgnorePointer(
+      child: TweenAnimationBuilder<double>(
+        tween: Tween(begin: 0.88, end: 1.0),
+        duration: const Duration(milliseconds: 620),
+        curve: Curves.easeOutBack,
+        builder: (_, scale, child) => Transform.scale(scale: scale, child: child),
+        child: Container(
+          padding: const EdgeInsets.symmetric(horizontal: 15, vertical: 8),
+          decoration: BoxDecoration(
+            // v2.4.2：不透明深色。半透明黑叠在亮色画面上，胶囊边缘会透出
+            // 画面颜色（黄底 → 看着像两条黄线），靳老师反馈的正是这个。
+            color: const Color(0xE6101010),
+            borderRadius: BorderRadius.circular(20),
+          ),
+          child: const Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              SizedBox(
+                width: 13,
+                height: 13,
+                child: CircularProgressIndicator(
+                  strokeWidth: 2,
+                  color: Colors.white70,
+                ),
               ),
-              onPressed: () async {
-                if (vp == null) return;
-                playing ? await vp.pause() : await vp.play();
-                setState(() {});
-              },
-            ),
-            Expanded(
-              child: Text(
-                '${_detail.item.name} · ${_current.name}',
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
-                style: const TextStyle(color: Colors.white70, fontSize: 11),
+              SizedBox(width: 8),
+              Text(
+                '播放中',
+                style: TextStyle(color: Colors.white, fontSize: 12),
               ),
-            ),
-            IconButton(
-              iconSize: 24,
-              icon: const Icon(Icons.fullscreen, color: Colors.white),
-              onPressed: widget.onToggleFullscreen,
-            ),
-          ],
+            ],
+          ),
         ),
       ),
     );
   }
 
+  /// 小窗底部进度条：当前时间 / 可拖动滑块 / 总时长 / 全屏
+  Widget _buildMiniProgress(Duration pos, Duration dur) {
+    final vp = _vp;
+    return Container(
+      padding: const EdgeInsets.only(left: 10, right: 2),
+      // v2.4.3：原渐变底衬在亮色画面上边缘会形成一条亮带，看着像横线
+      color: const Color(0x8C000000),
+      child: Row(
+        children: [
+          Text(
+            _fmt(pos),
+            style: const TextStyle(
+              color: Colors.white70,
+              fontSize: 10,
+              decoration: TextDecoration.none,
+            ),
+          ),
+          Expanded(
+            // v2.4.2：原 Slider 会在同一条线上叠「红（已播）+ 灰（未播）」两段，
+            // 视觉上像两条横线。改成自绘单线：底色 1 条 + 进度覆盖同一条，
+            // 无论播放到哪都只有 1 条线。
+            child: _MiniProgressBar(
+              pos: pos,
+              dur: dur,
+              onSeek: (ms) async {
+                await vp?.seekTo(Duration(milliseconds: ms));
+                if (mounted) setState(() {});
+              },
+            ),
+          ),
+          Text(
+            dur > Duration.zero ? _fmt(dur) : '--:--',
+            style: const TextStyle(
+              color: Colors.white70,
+              fontSize: 10,
+              decoration: TextDecoration.none,
+            ),
+          ),
+          IconButton(
+            iconSize: 20,
+            padding: EdgeInsets.zero,
+            constraints: const BoxConstraints(minWidth: 34, minHeight: 34),
+            icon: const Icon(Icons.fullscreen, color: Colors.white),
+            onPressed: widget.onToggleFullscreen,
+          ),
+        ],
+      ),
+    );
+  }
+
   /// 加载态：自动回退期间在转圈下方常驻显示当前阶段。
-  Widget _buildLoading() {
-    return Column(
+  ///
+  /// v2.4.6：小窗里转圈改到中央按钮内部（见 [_buildMiniOverlay]），
+  /// 这里传 showSpinner: false 只显示文案，避免"按钮 + 下方转圈"两截脱节。
+  Widget _buildLoading({bool showSpinner = true}) {
+    return Padding(
+      // v2.4.6：小窗里转圈在中央按钮内，文案要下移，避免压在按钮上
+      padding: EdgeInsets.only(top: showSpinner ? 0 : 96),
+      child: Column(
       mainAxisSize: MainAxisSize.min,
       children: [
-        const CircularProgressIndicator(color: Colors.redAccent),
+        if (showSpinner) const CircularProgressIndicator(color: Colors.redAccent),
         if (_fallbackStatus != null) ...[
-          const SizedBox(height: 14),
+          SizedBox(height: showSpinner ? 14 : 0),
           Padding(
             padding: const EdgeInsets.symmetric(horizontal: 24),
             child: Text(
               _fallbackStatus!,
               textAlign: TextAlign.center,
-              style: const TextStyle(color: Colors.white70, fontSize: 13),
+              // v2.4.3：显式关闭装饰，排除继承到双下划线的可能
+              style: const TextStyle(
+                color: Colors.white70,
+                fontSize: 13,
+                decoration: TextDecoration.none,
+              ),
             ),
           ),
         ],
       ],
+      ),
     );
   }
 
@@ -1109,7 +1324,8 @@ class _PlayerPageState extends State<PlayerPage> with WidgetsBindingObserver {
                             ? 1
                             : dur.inMilliseconds.toDouble(),
                         activeColor: Colors.redAccent,
-                        inactiveColor: Colors.white24,
+                        // v2.4.2：与小窗一致，用不透明深灰，避免透出画面颜色
+                        inactiveColor: const Color(0xFF4A4A4A),
                         onChanged: (v) async {
                           await vp?.seekTo(Duration(milliseconds: v.toInt()));
                           _armHide();
@@ -1220,5 +1436,79 @@ class _PlayerPageState extends State<PlayerPage> with WidgetsBindingObserver {
       return '$h:${m.toString().padLeft(2, '0')}:${s.toString().padLeft(2, '0')}';
     }
     return '$m:${s.toString().padLeft(2, '0')}';
+  }
+}
+
+/// v2.4.2：小窗自绘进度条 —— 只有一条线（底色）+ 同一条上的进度覆盖，
+/// 不再像 Slider 那样把「已播/未播」画成两段、视觉上像两条横线。
+class _MiniProgressBar extends StatelessWidget {
+  final Duration pos;
+  final Duration dur;
+  final ValueChanged<int> onSeek;
+
+  const _MiniProgressBar({
+    required this.pos,
+    required this.dur,
+    required this.onSeek,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final maxMs = dur.inMilliseconds > 0 ? dur.inMilliseconds : 1;
+    final frac = (pos.inMilliseconds / maxMs).clamp(0.0, 1.0);
+    return LayoutBuilder(
+      builder: (ctx, c) {
+        void seekTo(double dx) {
+          if (c.maxWidth <= 0) return;
+          final f = (dx / c.maxWidth).clamp(0.0, 1.0);
+          onSeek((f * maxMs).round());
+        }
+
+        return GestureDetector(
+          behavior: HitTestBehavior.opaque,
+          onTapDown: (d) => seekTo(d.localPosition.dx),
+          onHorizontalDragUpdate: (d) => seekTo(d.localPosition.dx),
+          child: SizedBox(
+            height: 26,
+            child: Stack(
+              alignment: Alignment.centerLeft,
+              children: [
+                Container(
+                  height: 2.5,
+                  decoration: BoxDecoration(
+                    // v2.4.2：必须用**不透明**深灰。原来 white24 是半透明，
+                    // 叠在亮色画面上会透出画面颜色（例如片尾黄底 → 进度条
+                    // 左右未播段变成两条黄线，靳老师反馈的正是这个）。
+                    color: const Color(0xFF4A4A4A),
+                    borderRadius: BorderRadius.circular(2),
+                  ),
+                ),
+                FractionallySizedBox(
+                  widthFactor: frac,
+                  child: Container(
+                    height: 2.5,
+                    decoration: BoxDecoration(
+                      color: Colors.redAccent,
+                      borderRadius: BorderRadius.circular(2),
+                    ),
+                  ),
+                ),
+                Align(
+                  alignment: Alignment(frac * 2 - 1, 0),
+                  child: Container(
+                    width: 8,
+                    height: 8,
+                    decoration: const BoxDecoration(
+                      color: Colors.white,
+                      shape: BoxShape.circle,
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        );
+      },
+    );
   }
 }

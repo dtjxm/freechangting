@@ -5,7 +5,7 @@
 /// 由 `test/version_guard_test.dart` 静态校验，不一致时测试会失败。
 library;
 
-const kAppVersion = 'v2.4.0';
+const kAppVersion = 'v2.4.6';
 
 /// 应用 build 号（versionCode）—— 与 `pubspec.yaml` 的 `version:` 里 `+` 后数字一致。
 /// v2.2.5 应用内更新用它跟远端 version.json 的 versionCode 比对，判断是否有新版。
@@ -15,4 +15,4 @@ const kAppVersion = 'v2.4.0';
 /// 是 2051~2054，v2.2.7/2.2.8 是 55/56。本轮取 2057，既高于 v2.2.6 的 2054，
 /// 也高于 v2.2.7/2.2.8 的 55/56，三个旧版都能在应用内直接升级。后续版本请继续
 /// 只增不减（例如 2.3.0+2058）。
-const kVersionCode = 2060;
+const kVersionCode = 2066;
