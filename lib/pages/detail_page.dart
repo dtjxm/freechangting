@@ -440,10 +440,15 @@ class _DetailPageState extends State<DetailPage> {
   }
 
   void _playFromArea(VideoDetail d, HistoryEntry? h, bool resume) {
-    final eps = d.groups.isNotEmpty ? d.groups[_groupIndex].episodes : const <Episode>[];
-    if (eps.isEmpty) return;
+    if (d.groups.isEmpty) return;
     if (resume && h != null) {
-      _play(_groupIndex, h.epIndex); // _play 内部会按同线路同集恢复时间点
+      // v2.4.7：按观看记录里的「线路 + 集号」起播，_play 内再恢复时间点。
+      // 旧实现用当前 _groupIndex，线路不同（或记录集号≠当前集）时只回到第 0 集从头播。
+      var gi = h.groupIndex;
+      if (gi < 0 || gi >= d.groups.length) gi = 0;
+      var ei = h.epIndex;
+      if (ei < 0 || ei >= d.groups[gi].episodes.length) ei = 0;
+      _play(gi, ei);
     } else {
       _play(_groupIndex, 0);
     }
@@ -702,7 +707,8 @@ class _DetailPageState extends State<DetailPage> {
         DropdownButton<int>(
           value: widget.item.sourceId,
           isExpanded: true,
-          underline: Container(height: 1, color: context.divider),
+          // v2.4.8：去掉下拉自带下划线（此前与分区线叠成“双线”）
+          underline: const SizedBox.shrink(),
           items: [
             DropdownMenuItem(
               value: widget.item.sourceId,

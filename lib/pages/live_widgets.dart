@@ -45,7 +45,7 @@ class LiveChannelTile extends StatelessWidget {
         ),
         subtitle: Text(
           '${channel.sub.isEmpty ? channel.top : channel.sub} · '
-          '${channel.lines.length} 条线路${_speedText(channel)}',
+          '${channel.isDynamic ? '网页源 · 播放时解析' : '${channel.lines.length} 条线路${_speedText(channel)}'}',
           style: TextStyle(fontSize: 11, color: context.tFaint),
         ),
         trailing: Icon(

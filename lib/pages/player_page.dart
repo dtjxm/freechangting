@@ -964,30 +964,43 @@ class _PlayerPageState extends State<PlayerPage> with WidgetsBindingObserver {
             child: AnimatedOpacity(
               duration: const Duration(milliseconds: 160),
               opacity: (_showControls && !_playFlash) ? 1.0 : 0.0,
-              child: Container(
+              // v2.4.8：加载时不画圆圈，转圈直接占播放按钮的位置与尺寸，
+              // 起播后无缝换成按钮图标（同一 54×54 槽位，不跳动）。
+              child: SizedBox(
                 width: 54,
                 height: 54,
-                decoration: BoxDecoration(
-                  shape: BoxShape.circle,
-                  // 同样用不透明深色，避免在亮色画面上透色
-                  color: const Color(0xCC1A1A1A),
-                  border: Border.all(color: Colors.white70, width: 1.6),
-                ),
-                child: loading
-                    ? const Padding(
-                        padding: EdgeInsets.all(15),
-                        child: CircularProgressIndicator(
-                          strokeWidth: 2.4,
-                          color: Colors.white,
+                child: AnimatedSwitcher(
+                  duration: const Duration(milliseconds: 180),
+                  child: loading
+                      ? const Center(
+                          key: ValueKey('loading'),
+                          child: SizedBox(
+                            width: 34,
+                            height: 34,
+                            child: CircularProgressIndicator(
+                              strokeWidth: 3,
+                              color: Colors.white,
+                              backgroundColor: Colors.white24,
+                            ),
+                          ),
+                        )
+                      : Container(
+                          key: const ValueKey('icon'),
+                          decoration: BoxDecoration(
+                            shape: BoxShape.circle,
+                            // 不透明深色，避免在亮色画面上透色
+                            color: const Color(0xCC1A1A1A),
+                            border: Border.all(color: Colors.white70, width: 1.6),
+                          ),
+                          child: Icon(
+                            playing
+                                ? Icons.pause_rounded
+                                : Icons.play_arrow_rounded,
+                            size: 32,
+                            color: Colors.white,
+                          ),
                         ),
-                      )
-                    : Icon(
-                        playing
-                            ? Icons.pause_rounded
-                            : Icons.play_arrow_rounded,
-                        size: 32,
-                        color: Colors.white,
-                      ),
+                ),
               ),
             ),
           ),

@@ -34,9 +34,12 @@ class TvChannel {
   final String name;
   final String logo;
   final String group;
-  final String top; // 央视频道 / 卫视频道 / 地方频道 / 港澳台 / 国际频道
-  final String sub; // 省份 或 香港/澳门/台湾/国际/其他（央视/卫视为空）
+  final String top; // 央视与卫视 / 地方频道 / 港澳台 / 国际 / 影视专区
+  final String sub; // 央视/卫视/少儿/教育 · 省份 · 香港/澳门/台湾 · 国家（影视专区为空）
   final List<TvLine> lines;
+
+  /// v2.4.8：网页源（官方只给播放页）。没有静态线路时，播放前由 API 实时解析。
+  final String? pageUrl;
 
   TvChannel({
     required this.number,
@@ -46,7 +49,10 @@ class TvChannel {
     required this.top,
     required this.sub,
     required this.lines,
+    this.pageUrl,
   });
+
+  bool get isDynamic => (pageUrl ?? '').isNotEmpty && lines.isEmpty;
 
   /// 数字段分割正则（**必须用 allMatches 手工切分**）
   ///
@@ -146,8 +152,11 @@ class TvChannel {
 
 /// 清单：一级 / 二级 / 频道索引
 class TvCatalog {
-  /// 一级固定五类（v2.3.0：港澳台与国际拆分为两个独立大类）
-  static const List<String> tops = ['央视频道', '卫视频道', '地方频道', '港澳台', '国际频道'];
+  /// 一级固定五类（v2.4.8：与 PC 端对齐）
+  static const List<String> tops = ['央视与卫视', '地方频道', '港澳台', '国际', '影视专区', '其他杂项'];
+
+  /// 央视与卫视 的固定二级
+  static const List<String> cwSubs = ['央视', '卫视', '少儿', '教育'];
 
   /// 港澳台 的固定二级
   static const List<String> hmtSubs = ['香港', '澳门', '台湾'];
@@ -195,9 +204,9 @@ class TvCatalog {
     '其他',
   ];
 
-  /// 央视频道 / 卫视频道：取消二级（整类平铺）
+  /// 影视专区：无二级（整类平铺）
   static bool hasSub(String top) =>
-      top == '地方频道' || top == '港澳台' || top == '国际频道';
+      top == '央视与卫视' || top == '地方频道' || top == '港澳台' || top == '国际' || top == '其他杂项';
 
   final List<TvChannel> all;
   final String generatedAt;
@@ -233,7 +242,8 @@ class TvCatalog {
               (v[i] is int ? v[i] == 1 : v[i].toString() == '1');
           lines.add(TvLine(urls[i], i < ms.length ? ms[i] : -1, verified: ok));
         }
-        if (lines.isEmpty) continue;
+        final pageUrl = (m['pageUrl'] ?? '').toString();
+        if (lines.isEmpty && pageUrl.isEmpty) continue;
         out.add(
           TvChannel(
             number: (m['number'] as num?)?.toInt() ?? (out.length + 1),
@@ -243,6 +253,7 @@ class TvCatalog {
             top: (m['top'] ?? '地方频道').toString(),
             sub: (m['sub'] ?? '').toString(),
             lines: lines,
+            pageUrl: pageUrl.isEmpty ? null : pageUrl,
           ),
         );
       }
@@ -262,9 +273,20 @@ class TvCatalog {
       for (final c in all)
         if (c.top == top) c.sub,
     };
+    if (top == '其他杂项') {
+      final cnt = <String, int>{};
+      for (final c in all) {
+        if (c.top == top) cnt[c.sub] = (cnt[c.sub] ?? 0) + 1;
+      }
+      final out = cnt.keys.where((s) => s.isNotEmpty).toList()
+        ..sort((a, b) => cnt[b]!.compareTo(cnt[a]!));
+      return out;
+    }
     final order = top == '地方频道'
         ? provinces
-        : (top == '港澳台' ? hmtSubs : intlCountries);
+        : (top == '港澳台'
+            ? hmtSubs
+            : (top == '央视与卫视' ? cwSubs : intlCountries));
     final out = <String>[];
     for (final s in order) {
       if (present.contains(s)) out.add(s);

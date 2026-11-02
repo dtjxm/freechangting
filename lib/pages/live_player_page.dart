@@ -1,8 +1,10 @@
 import 'dart:async';
+import 'dart:convert';
 import 'dart:io';
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:http/http.dart' as http;
 import 'package:media_kit/media_kit.dart';
 import 'package:media_kit_video/media_kit_video.dart';
 import 'package:wakelock_plus/wakelock_plus.dart';
@@ -55,6 +57,9 @@ class _LivePlayerPageState extends State<LivePlayerPage> {
   bool _buffering = false;
   bool _playing = false;
   String? _error;
+
+  /// 网页源解析阶段提示（解析完置空）
+  String? _fallbackStatus;
   bool _showControls = true;
   Timer? _hideTimer;
 
@@ -91,7 +96,11 @@ class _LivePlayerPageState extends State<LivePlayerPage> {
     ]);
     WakelockPlus.enable();
     _bindPlayerStreams();
-    _play();
+    if (_lines.isEmpty && (_chan.pageUrl ?? '').isNotEmpty) {
+      _resolveAndPlay();
+    } else {
+      _play();
+    }
     WidgetsBinding.instance.addPostFrameCallback((_) => _armHide());
   }
 
@@ -248,6 +257,68 @@ class _LivePlayerPageState extends State<LivePlayerPage> {
     _hideTimer = Timer(const Duration(seconds: 4), () {
       if (mounted) setState(() => _showControls = false);
     });
+  }
+
+  /// v2.4.8：网页源频道 —— 播放前实时解析真实流地址（大同 mapi 接口）
+  Future<void> _resolveAndPlay() async {
+    final pageUrl = _chan.pageUrl ?? '';
+    setState(() {
+      _error = null;
+      _buffering = true;
+      _fallbackStatus = '该台为网页源，正在解析线路…';
+    });
+    try {
+      Uri uri = Uri.parse(pageUrl);
+      String? apiUrl;
+      if (uri.host.endsWith('dtradio.com.cn')) {
+        final cid = uri.queryParameters['channel_id'];
+        if (cid == null || cid.isEmpty) throw '缺少频道参数';
+        apiUrl = 'http://mapi.dtradio.com.cn/api/v1/program.php?channel_id=$cid&zone=';
+      }
+      if (apiUrl == null) throw '暂不支持该站点';
+
+      const ua = 'Mozilla/5.0 (Linux; Android 12) AppleWebKit/537.36 Chrome/120 Mobile Safari/537.36';
+      final resp = await http.get(Uri.parse(apiUrl), headers: {
+        'User-Agent': ua,
+        'Referer': 'http://share.dtradio.com.cn/',
+      }).timeout(const Duration(seconds: 12));
+      final j = jsonDecode(resp.body);
+      final list = (j is List ? j : (j['data'] as List? ?? const []))
+          .cast<Map<String, dynamic>>();
+      if (list.isEmpty) throw '接口未返回节目单';
+      final live = list.firstWhere((e) => e['now_play'] == 1,
+          orElse: () => list.first);
+      String? playUrl = (live['m3u8'] ?? '').toString();
+      if (playUrl.isEmpty) throw '未取到播放地址';
+
+      // master playlist → 取第一条子清单，避免播放器对相对路径解析出错
+      final mt = await http
+          .get(Uri.parse(playUrl), headers: {'User-Agent': ua})
+          .timeout(const Duration(seconds: 10));
+      if (mt.body.contains('#EXT-X-STREAM-INF')) {
+        final sub = mt.body
+            .split('\n')
+            .map((e) => e.trim())
+            .firstWhere((e) => e.isNotEmpty && !e.startsWith('#'),
+                orElse: () => '');
+        if (sub.isNotEmpty) playUrl = Uri.parse(playUrl).resolve(sub).toString();
+      }
+
+      if (!mounted) return;
+      setState(() {
+        _lines = [TvLine(playUrl!, 0, verified: true)];
+        _idx = 0;
+        _fallbackStatus = null;
+      });
+      _play();
+    } catch (e) {
+      if (!mounted) return;
+      setState(() {
+        _buffering = false;
+        _fallbackStatus = null;
+        _error = '解析失败：$e\n可稍后重试，或到 PC 端观看';
+      });
+    }
   }
 
   Future<void> _play() async {
@@ -437,7 +508,7 @@ class _LivePlayerPageState extends State<LivePlayerPage> {
                 selected: c.name == _chan.name,
                 title: Text(c.name, style: const TextStyle(fontSize: 13.5)),
                 subtitle: Text(
-                  '${c.top}${c.sub.isEmpty ? '' : ' · ${c.sub}'} · ${c.lines.length} 条线路',
+                  '${c.top}${c.sub.isEmpty ? '' : ' · ${c.sub}'} · ${c.lines.isEmpty && (c.pageUrl ?? '').isNotEmpty ? '网页源' : '${c.lines.length} 条线路'}',
                   style: TextStyle(fontSize: 11, color: ctx.tFaint),
                 ),
                 onTap: () {
@@ -447,8 +518,13 @@ class _LivePlayerPageState extends State<LivePlayerPage> {
                     _chan = c;
                     _lines = LiveSourceHealth.orderLines(c.lines);
                     _idx = 0;
+                    _error = null;
                   });
-                  _play();
+                  if (_lines.isEmpty && (c.pageUrl ?? '').isNotEmpty) {
+                    _resolveAndPlay();
+                  } else {
+                    _play();
+                  }
                 },
               ),
           ],
@@ -573,7 +649,10 @@ class _LivePlayerPageState extends State<LivePlayerPage> {
         ),
       const SizedBox(height: 12),
       Text(
-        '正在连接 ${_chan.name} · 线路${_idx + 1}/${_lines.length}…',
+        _fallbackStatus ??
+            (_lines.isEmpty
+                ? '正在准备 ${_chan.name}…'
+                : '正在连接 ${_chan.name} · 线路${_idx + 1}/${_lines.length}…'),
         style: const TextStyle(color: Colors.white70, fontSize: 13),
       ),
     ],
