@@ -1,11 +1,11 @@
 {
-  "versionCode": 28,
-  "versionName": "1.2.3",
+  "versionCode": 30,
+  "versionName": "1.2.5",
   "url": "https://ghfast.top/https://raw.githubusercontent.com/dtjxm/freechangting/main/app-release.apk",
-  "size": 3136466,
-  "md5": "10dffb69c9a838b9f6b0c1c39dc7b062",
-  "sha256": "ac21f20a467f4e50ad47d24dab57ed7d908b4d14b8903c2a13e23a33cdc6ed37",
-  "note": "剔除两个「能拉到清单、却放不出声」的国际台（MBC FM / Arirang Radio）—— 它们的 m3u8 都能正常取回，但在 Android WebView + hls.js 上一个分片都不请求，点进去只有静音，对用户等价于死链。已用独立 <video> 承载、关掉 Worker 两种方式复测，仍无声音，故不再收录。电台总数 143 → 141，地区 32 → 30（内地 29 省市区 + 香港），地区抽屉从九大区回到八大区；无 http 明文线路残留。",
+  "size": 3140351,
+  "md5": "8a1e1b2c34bae904424c06a79d3b7b73",
+  "sha256": "4da8a7e5ef3c61b261838cdc3d7f91f70407fd66d149c4ab32777eec0348586c",
+  "note": "修直播起播竞态（AbortError 退避重试）+ 报错说人话（带 HTTP 码）+ 断流自动重连（整条重建换新 token，上限 4 次）；真机复测发现央广卫星站 11 台 + 辽宁都市 1 台为 TS 分片且无有效 PMT（分片能下、真机无声），全部剔除。电台 143 → 131、地区 30 → 26（北京/吉林/四川/甘肃归零），全库 AAC 分片 + https，真机出声验证通过。",
   "force": false,
-  "publishedAt": "2026-10-28T17:16:52.892Z"
+  "publishedAt": "2026-11-02T12:57:32.736Z"
 }
