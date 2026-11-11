@@ -155,11 +155,61 @@ class MacApi {
     }
   }
 
+  /// v2.4.10：判断是否为「可直接播放」的流地址。
+  /// 建安这类源给的是 B 站/腾讯等网页播放页（play_from=bilibili），
+  /// 播放器拿不到流，必须在入库前就识别出来。
+  static bool isDirectStream(String url) {
+    var u = url.trim().toLowerCase();
+    if (u.isEmpty) return false;
+    // 少数源给协议相对地址（//cdn.../index.m3u8），按 https 处理
+    if (u.startsWith('//')) u = 'https:$u';
+    if (!(u.startsWith('http://') || u.startsWith('https://'))) return false;
+    if (u.contains('.m3u8') || u.contains('.mp4') || u.contains('.flv')) return true;
+    if (u.contains('/hls/') || u.contains('playlist.m3u8')) return true;
+    return false;
+  }
+
+  static const List<String> _webPlayerHosts = [
+    'bilibili.com', 'v.qq.com', 'iqiyi.com', 'youku.com', 'mgtv.com',
+    'wasu.cn', 'pptv.com', 'letv.com', 'sohu.com', '1905.com',
+    'acfun.cn', 'douyin.com', 'kuaishou.com', 'ixigua.com',
+  ];
+
+  /// 已知的网页播放页（不是流）
+  static bool isWebPlayerPage(String url) {
+    final u = url.trim().toLowerCase();
+    if (u.isEmpty || isDirectStream(u)) return false;
+    return _webPlayerHosts.any((h) => u.contains(h));
+  }
+
+  /// vod_play_url（# 分集、$ 分隔）里是否至少有一条直链
+  static bool hasDirectStream(String joined) {
+    if (joined.trim().isEmpty) return false;
+    for (final pair in joined.split('#')) {
+      final i = pair.indexOf(r'$');
+      final u = i >= 0 ? pair.substring(i + 1) : pair;
+      if (isDirectStream(u)) return true;
+    }
+    return false;
+  }
+
+  /// 首页过滤：整条都是已知网页播放页的条目直接不展示
+  static bool isWebOnlyItem(Map<String, dynamic> m) {
+    final joined = '${m['vod_play_url'] ?? ''}';
+    if (joined.trim().isEmpty) return false;   // 列表没给地址 → 保留，详情再判断
+    if (hasDirectStream(joined)) return false;
+    return joined.split('#').any((p) {
+      final i = p.indexOf(r'$');
+      return isWebPlayerPage(i >= 0 ? p.substring(i + 1) : p);
+    });
+  }
+
   List<VideoItem> _parseItems(Map<String, dynamic>? obj, MovieSource s) {
     final raw = obj?['list'];
     if (raw is! List) return const [];
     return raw
         .whereType<Map<String, dynamic>>()
+        .where((m) => !isWebOnlyItem(m))
         .map((m) {
           // v1.6.3 卡片展示：年份 + 主演（主演为空时用导演兜底）
           final actor = '${m['vod_actor'] ?? ''}'.trim();
@@ -918,7 +968,10 @@ class MacApi {
           eps.add(Episode(name.isEmpty ? '第${eps.length + 1}集' : name, epUrl));
         }
       }
-      if (eps.isNotEmpty) groups.add(PlayGroup(from, eps));
+      // v2.4.10：只剔除「已知网页播放页」（B 站/腾讯等），
+      // 未知域名保留（部分源用 ?url= 代理，仍可能可播）
+      final direct = eps.where((e) => !isWebPlayerPage(e.url)).toList();
+      if (direct.isNotEmpty) groups.add(PlayGroup(from, direct));
     }
 
     return VideoDetail(

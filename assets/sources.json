@@ -259,13 +259,6 @@
   "library": "约10万部"
  },
  {
-  "id": 43,
-  "name": "建安",
-  "url": "http://154.219.117.232:9981/jacloudapi.php/provide/vod/",
-  "ac": "detail",
-  "library": "约6.5万部"
- },
- {
   "id": 44,
   "name": "无水印",
   "url": "https://api.wsyzy.net/api.php/provide/vod/",

@@ -82,6 +82,26 @@ class _DetailPageState extends State<DetailPage> {
       _detail = d;
       _loading = false;
     });
+
+    // v2.4.10：当前源只有网页播放页（如建安 → B 站链接）时，
+    // 自动找同名可播片源并切过去，避免用户点播放才看到「不可用」。
+    if (d.groups.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+          content: Text('「${d.item.sourceName}」只提供网页播放页，正在寻找可播片源…')));
+      await _loadRelated();
+      if (!mounted) return;
+      if (_related.isNotEmpty) {
+        final alt = _related.first;
+        _switchToRelated(alt);
+        return;
+      }
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+            content: Text('暂未找到可播片源，可点「换源」手动选择')));
+      }
+      return;
+    }
+
     _loadRelated();
   }
 
