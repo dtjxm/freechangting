@@ -1,11 +1,10 @@
 {
-  "versionCode": 2060,
-  "versionName": "2.4.0",
-  "url": "https://ghfast.top/https://github.com/dtjxm/freechangting/releases/download/v2.4.0/dysj-release.apk",
-  "size": 58253833,
-  "md5": "e1720c912e4999357734e2afe7f1131a",
-  "sha256": "ff72630ab516dc5bb8c75ae7fa8449b0896c67397f7a9dd7ce5df64300326d85",
-  "note": "v2.4.0 更新：① 详情页小窗播放——点播放先在详情页小窗播放，点「全屏」才铺满整屏，退出全屏或按返回回到小窗，播放不中断、进度不丢；竖屏视频全屏保持竖屏，横屏视频自动横屏。② 修复 6 项问题：起播 15 秒超时并自动换线、切后台自动暂停、假时长 24:00:00、断网无提示、直播切台看门狗 20 秒收紧到 12 秒、底部控件遮挡手势区。③ 电视线路流级验证：2,261 条线路逐条解析清单并实际下载媒体分片，719 条实测可播（覆盖 409 台），可播线路优先展示。④ versionCode 2060，2.2.9 及更早版本可直接覆盖升级。",
+  "versionCode": 2070,
+  "versionName": "2.4.10",
+  "size": 58470759,
+  "sha256": "e171d20f00881f6ed3b8c96497af5a82f8ffec613eaa102401992c8774525c2a",
+  "note": "v2.4.10 更新：① 修复「建安」等网页播放页片源「首页能看、点播不可用」——其播放地址是 B 站网页链接，不是视频流；首页/检索现在会过滤整条只有网页播放地址的条目，详情无可播线路时自动切换同名可播片源。② 「建安」片源已下线（49→48）。③ 兼容 //cdn.../index.m3u8 协议相对地址。④ versionCode 2070，2.4.9 及更早版本可直接覆盖升级。",
   "force": false,
-  "publishedAt": "2026-10-28T17:28:18.000Z"
+  "url": "https://ghfast.top/https://github.com/dtjxm/freechangting/releases/download/v2.4.10/dysj-release.apk",
+  "publishedAt": "2026-11-11T15:40:00.000Z"
 }
